@@ -1,0 +1,15 @@
+[workspace]
+members = [
+	"node",
+	"pallets/*",
+	"runtime",
+]
+
+[profile.release]
+panic = "unwind"
+opt-level = 3
+
+[profile.production]
+inherits = "release"
+lto = true
+codegen-units = 1
