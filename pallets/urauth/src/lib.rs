@@ -2,34 +2,63 @@
 
 use codec::{Codec, Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
+
+use frame_support::{
+    pallet_prelude::*,
+    BoundedVec,
+};
+
+use frame_system::pallet_prelude::*;
 use sp_runtime::{
     traits::{MaybeSerializeDeserialize, AtLeast32BitUnsigned, Verify, IdentifyAccount},
-    RuntimeDebug, FixedPointOperand, 
-    transaction_validity::InvalidTransaction,
+    MultiSignature, MultiSigner, RuntimeDebug, FixedPointOperand,
 };
 use sp_core::*;
+use sp_consensus_vrf::schnorrkel::Randomness;
 
-pub type DomainName = Vec<u8>;
-pub type OwnerDid = Vec<u8>;
-pub type Weight = u16;
+pub use pallet::*;
 
-pub type AccountIdFor<T> = <T as Config>::AccountId;
+#[cfg(test)]
+pub mod tests;
 
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
+pub struct DID<Account> {
+    pub did: Account,
+    pub weight: DIDWeight
+}
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub struct URI(Vec<u8>);
+
+pub type DIDWeight = u16;
+pub type OwnerDID = Vec<u8>;
+pub type DocId = Vec<u8>;
+pub type DomainName = Vec<u8>;
+
+#[derive(Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum URAuthSignedPayload<T: Config> {
-    Request { uri: Uri, owner_did: OwnerDid },
-    Update { urauth_doc: URAuthDoc<AccountIdFor<T>, T::Balance, T::Signature>, owner_did: OwnerDid }
+    Request { uri: URI, owner_did: OwnerDID },
+    Challenge { uri: URI, admin_did: OwnerDID, challenge: Vec<u8>, timestamp: Vec<u8> },
+    Update { urauth_doc: URAuthDoc<T::AccountId, T::Balance>, owner_did: OwnerDID }
 }
 
 impl<T: Config> Encode for URAuthSignedPayload<T> {
     fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
-        self.using_encoded(|payload| {
-            if payload.len() > 256 {
-                f(&blake2_256(payload)[..])
-            } else {
-                f(payload)
+        let raw_payload = match self {
+            URAuthSignedPayload::Request { uri, owner_did } => {
+                (uri, owner_did).encode()
+            },
+            URAuthSignedPayload::Challenge { uri, admin_did, challenge, timestamp } => {
+                (uri, admin_did, challenge, timestamp).encode()
             }
-        })
+            URAuthSignedPayload::Update { urauth_doc, owner_did } => {
+                (urauth_doc, owner_did).encode()
+            }
+        };
+        if raw_payload.len() > 256 {
+            f(&blake2_256(&raw_payload)[..])
+        } else {
+            f(&raw_payload)
+        }
     }
 }
 
@@ -37,15 +66,12 @@ pub enum URAuthDocField {
     AccessRule()
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct Uri(Vec<u8>);
-
 // Multisig-enabled DID 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct MultiDid<Account> {
-	ids: Vec<(Account, Weight)>,
+pub struct MultiDID<Account> {
+	dids: Vec<DID<Account>>,
 	// Sum(weight) >= threshold
-	threshold: Weight,
+	threshold: DIDWeight,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
@@ -85,27 +111,25 @@ pub enum ContentType {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub enum Proof<Signature> { 
+pub enum Proof { 
 	// To be defined 
 	// Digital Sig
-	ProofV1 { proof_value: Signature } 
+	ProofV1 { proof_value: MultiSignature } 
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct URAuthDoc<Account, Balance, Signature> {
-    id: Vec<u8>,
-    uri: Uri,
+pub struct URAuthDoc<Account, Balance> {
+    id: DocId,
+    uri: URI,
 	created_at: u64,
 	updated_at: u64, 
-	owner_did: MultiDid<Account>,
-	identity_info: Vec<Vec<u8>>,
-	content_metadata: ContentMetadata,
-	copyright_info: CopyrightInfo,
-	access_rules: Vec<AccessRule<Balance>>,
-	proofs: Proof<Signature>,
+	owner_did: MultiDID<Account>,
+	identity_info: Option<Vec<Vec<u8>>>,
+	content_metadata: Option<ContentMetadata>,
+	copyright_info: Option<CopyrightInfo>,
+	access_rules: Option<Vec<AccessRule<Balance>>>,
+	proofs: Option<Proof>,
 }
-
-pub use pallet::*;
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
@@ -113,15 +137,17 @@ mod benchmarking;
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
-    use frame_support::pallet_prelude::*;
-    use frame_system::pallet_prelude::*;
 
     #[pallet::pallet]
     pub struct Pallet<T>(_);
 
     #[pallet::config]
     pub trait Config: frame_system::Config {
+
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+
+        type MaxOracleMemembers: Get<u32>;
+
         type Balance: Parameter
             + Member
             + AtLeast32BitUnsigned
@@ -133,16 +159,21 @@ pub mod pallet {
             + MaxEncodedLen
             + TypeInfo
             + FixedPointOperand;
-        /// A Signature can be verified with a specific `PublicKey`. The additional traits are boilerplate.
-        type Signature: Verify<Signer = <Self as pallet::Config>::AccountId> + Encode + Decode + Parameter;
-        /// A PublicKey can be converted into an `AccountId`. This is required by the `Signature` type.
-        /// The additional traits are boilerplate.
-        type AccountId: IdentifyAccount<AccountId = <Self as pallet::Config>::AccountId> + Encode + Decode + Parameter;
+        
+        type OracleOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
 
     #[pallet::storage]
     #[pallet::unbounded]
-    pub type URAuthDocs<T: Config> = StorageMap<_, Blake2_128Concat, Uri, URAuthDoc<AccountIdFor<T>, T::Balance, sr25519::Signature>>;
+    pub type URAuthDocs<T: Config> = StorageMap<_, Blake2_128Concat, URI, URAuthDoc<T::AccountId, T::Balance>>;
+
+    #[pallet::storage]
+    #[pallet::unbounded]
+    pub type ChallengeValue<T: Config> = StorageMap<_, Twox128, URI, Randomness>;
+
+    #[pallet::storage]
+    #[pallet::getter(fn oracle_members)]
+    pub type OracleMembers<T: Config> = StorageValue<_, BoundedVec<T::AccountId, T::MaxOracleMemembers>, ValueQuery>;
 
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
@@ -153,8 +184,9 @@ pub mod pallet {
 
     #[pallet::error]
     pub enum Error<T> {
-        NoneValue,
-        StorageOverflow,
+        BadProof,
+        BadChallengeValue,
+        NotOracleMember,
     }
 
     #[pallet::call]
@@ -163,19 +195,64 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn urauth_request_register_domain_owner(
             origin: OriginFor<T>, 
-            domain_name: DomainName, 
-            owner_did: OwnerDid, 
-            owner_account: AccountIdFor<T>,
-            owner_sig: T::Signature,
+            uri: URI, 
+            owner_did: OwnerDID, 
+            signer: MultiSigner,
+            signature: MultiSignature,
         ) -> DispatchResult {
-            let owner = ensure_signed(origin)?;
-            let raw_payload = (domain_name, owner_did).encode();
-            if !owner_sig.verify(&raw_payload, owner_account) {
-                return Err(InvalidTransaction::BadProof.into())
+            let _ = ensure_signed(origin)?;
+            let urauth_signed_payload = URAuthSignedPayload::<T>::Request { uri: uri.clone(), owner_did };
+            if !urauth_signed_payload.using_encoded(|payload| signature.verify(payload, &signer.into_account())) {
+                return Err(Error::<T>::BadProof.into())
             }
+            let challenge_value = Self::challenge_value();
+            ChallengeValue::<T>::insert(&uri, challenge_value);
             Self::deposit_event(Event::<T>::URAuthRegisterRequested);
 
             Ok(())
         }
+
+        #[pallet::call_index(2)]
+        #[pallet::weight(1_000)]
+        pub fn verify_challenge(
+            origin: OriginFor<T>,
+            challenge_value: Vec<u8>,
+        ) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            let oracle_members = Self::oracle_members();
+            ensure!(oracle_members.contains(&who), Error::<T>::NotOracleMember);
+            // Create a str slice from the body.
+            let json_str = sp_std::str::from_utf8(&challenge_value).map_err(|_| Error::<T>::BadChallengeValue)?;
+            match lite_json::parse_json(json_str) {
+                Ok(obj) => {
+                    match obj {
+                        lite_json::JsonValue::Object(obj) => {},
+                        _ => { return Err(Error::<T>::BadChallengeValue.into()) }
+                    }
+                },
+                Err(_) => { return Err(Error::<T>::BadChallengeValue.into())}
+            }
+            Ok(())
+        }
+
+        #[pallet::call_index(3)]
+        #[pallet::weight(1_000)]
+        pub fn register_new_urauth_doc(
+            origin: OriginFor<T>,
+            uri: URI,
+            urauth_doc: URAuthDoc<T::AccountId, T::Balance>
+        ) -> DispatchResult {
+
+            T::OracleOrigin::ensure_origin(origin)?;
+
+            Ok(())
+        }
+    }
+}
+
+impl<T: Config> Pallet<T> {
+    // ToDo
+    fn challenge_value() -> Randomness {
+        Default::default()    
     }
 }
