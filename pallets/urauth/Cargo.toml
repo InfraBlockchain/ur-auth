@@ -1,10 +1,10 @@
 [package]
 name = "urauth"
-authors = ["Anonymous"]
+authors = ["blockchain labs"]
 description = "URAuth pallet"
 version = "0.1.0"
 license = "Unlicense"
-homepage = "https://substrate.io"
+homepage = "https://bc-labs.net/"
 repository = "https://github.com/InfraBlockchain/infra-substrate/"
 edition = "2021"
 

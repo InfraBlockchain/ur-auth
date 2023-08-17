@@ -1,14 +1,8 @@
-
-
 #[test]
 fn json_parse_works() {
-    use lite_json::{
-        json_parser::parse_json,
-        JsonValue
-    };
+    use lite_json::{json_parser::parse_json, JsonValue};
 
-    let json_string =
-	r#"
+    let json_string = r#"
         {
             "domain" : "website1.com",
             "adminDID" : "did:infra:ua:i3jr3...qW3dt",
@@ -24,7 +18,7 @@ fn json_parse_works() {
         } 
 	"#;
     let json_data = parse_json(json_string).expect("Invalid!");
-    let mut domain: String = "".into(); 
+    let mut domain: String = "".into();
     let mut admin_did: String = "".into();
     let mut challenge: String = "".into();
     let mut timestamp: String = "".into();
@@ -36,21 +30,23 @@ fn json_parse_works() {
             challenge = find_json_value(obj_value.clone(), "challenge".into()).unwrap();
             timestamp = find_json_value(obj_value.clone(), "timestamp".into()).unwrap();
             proof = find_json_value(obj_value.clone(), "proof".into()).unwrap();
-        },
+        }
         _ => {}
     }
-    println!("도메인 => {:?}, 어드민 => {:?}, 챌린지 => {:?}, 타임스탬프 => {:?}, 프루프 => {:?}", domain, admin_did, challenge, timestamp, proof);
+    println!(
+        "도메인 => {:?}, 어드민 => {:?}, 챌린지 => {:?}, 타임스탬프 => {:?}, 프루프 => {:?}",
+        domain, admin_did, challenge, timestamp, proof
+    );
 }
 
 fn find_json_value(json_object: lite_json::JsonObject, field_name: String) -> Option<String> {
-    let (_, json_value) = json_object.iter().find(|(field, _)| field.iter().copied().eq(field_name.chars())).unwrap();
+    let (_, json_value) = json_object
+        .iter()
+        .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
+        .unwrap();
     match json_value {
-        lite_json::JsonValue::String(v) => {
-            Some(v.iter().collect::<String>())
-        },
-        lite_json::JsonValue::Object(v) => {
-            find_json_value(v.clone(), "proofValue".into())
-        }
-        _ => None
+        lite_json::JsonValue::String(v) => Some(v.iter().collect::<String>()),
+        lite_json::JsonValue::Object(v) => find_json_value(v.clone(), "proofValue".into()),
+        _ => None,
     }
 }
