@@ -16,6 +16,7 @@ codec = { package = "parity-scale-codec", version = "3.0.0", features = [
 	"derive",
 ], default-features = false }
 scale-info = { version = "2.2.0", default-features = false, features = ["derive"] }
+lite-json = { version = "0.2.0", default-features = false }
 
 # Substrate
 frame-benchmarking = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, optional = true, branch = "master" }
@@ -24,6 +25,8 @@ frame-system = { git = "https://github.com/InfraBlockchain/infra-substrate", def
 sp-runtime = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 sp-core = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 sp-std = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+sp-consensus-vrf = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+pallet-collective = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 
 [dev-dependencies]
 serde = { version = "1.0.132" }
@@ -37,11 +40,14 @@ runtime-benchmarks = ["frame-benchmarking/runtime-benchmarks"]
 std = [
 	"codec/std",
 	"scale-info/std",
+    "lite-json/std",
 	"frame-benchmarking/std",
 	"frame-support/std",
 	"frame-system/std",
+    "pallet-collective/std",
     "sp-runtime/std",
     "sp-core/std",
     "sp-std/std",
+    "sp-consensus-vrf/std",
 ]
 try-runtime = ["frame-support/try-runtime"]
