@@ -1,3 +1,18 @@
+
+pub use super::VerificationSubmission;
+
+fn find_json_value(json_object: lite_json::JsonObject, field_name: String) -> Option<String> {
+    let (_, json_value) = json_object
+        .iter()
+        .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
+        .unwrap();
+    match json_value {
+        lite_json::JsonValue::String(v) => Some(v.iter().collect::<String>()),
+        lite_json::JsonValue::Object(v) => find_json_value(v.clone(), "proofValue".into()),
+        _ => None,
+    }
+}
+
 #[test]
 fn json_parse_works() {
     use lite_json::{json_parser::parse_json, JsonValue};
@@ -41,14 +56,20 @@ fn json_parse_works() {
     );
 }
 
-fn find_json_value(json_object: lite_json::JsonObject, field_name: String) -> Option<String> {
-    let (_, json_value) = json_object
-        .iter()
-        .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
-        .unwrap();
-    match json_value {
-        lite_json::JsonValue::String(v) => Some(v.iter().collect::<String>()),
-        lite_json::JsonValue::Object(v) => find_json_value(v.clone(), "proofValue".into()),
-        _ => None,
-    }
+#[test]
+fn verification_submission_dynamic_threshold_works() {
+    let mut submission = VerificationSubmission { status: vec![], threshold: 0 };
+    submission.update_threshold(1);
+    assert_eq!(submission.threshold, 1);
+    submission.update_threshold(2);
+    assert_eq!(submission.threshold, 2);
+    submission.update_threshold(3);
+    assert_eq!(submission.threshold, 2);
+    submission.update_threshold(4);
+    assert_eq!(submission.threshold, 3);
+    submission.update_threshold(5);
+    assert_eq!(submission.threshold, 3);
 }
+
+
+

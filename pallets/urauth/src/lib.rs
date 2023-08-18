@@ -1,6 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use codec::{Codec, Encode, Decode, MaxEncodedLen};
+use codec::{Codec, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
 
 use frame_support::{pallet_prelude::*, BoundedVec };
@@ -52,14 +52,12 @@ pub mod pallet {
             + MaxEncodedLen
             + TypeInfo
             + FixedPointOperand;
-
-        type OracleOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
 
     #[pallet::storage]
     #[pallet::unbounded]
     pub type URAuthTree<T: Config> =
-        StorageMap<_, Blake2_128Concat, URI, URAuthDoc<T::AccountId, T::Balance>>;
+        StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId, T::Balance>>;
 
     #[pallet::storage]
     #[pallet::unbounded]
@@ -68,9 +66,9 @@ pub mod pallet {
 
     #[pallet::storage]
     #[pallet::unbounded]
-    #[pallet::getter(fn uri_approval_status)]
+    #[pallet::getter(fn uri_verification_info)]
     pub type URIVerificationInfo<T: Config> = 
-        StorageMap<_, Twox128, URI, (BoundedVec<(H256, ApprovalCount), T::MaxOracleMemembers>, Threshold)>;
+        StorageMap<_, Twox128, URI, VerificationSubmission>;
 
     #[pallet::storage]
     #[pallet::unbounded]

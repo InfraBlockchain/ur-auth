@@ -4,6 +4,7 @@ use super::*;
 use codec::{Encode, Decode, MaxEncodedLen};
 use scale_info::TypeInfo;
 use sp_runtime::RuntimeDebug;
+use sp_std::if_std;
 
 pub type DIDWeight = u16;
 pub type OwnerDID = Vec<u8>;
@@ -46,6 +47,42 @@ impl Metadata {
         Self {
             uri, owner_did, challenge_value
         }
+    }
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub struct VerificationSubmission  {
+    pub status: Vec<(H256, ApprovalCount)>,
+    pub threshold: Threshold
+}
+
+impl VerificationSubmission {
+
+    pub fn update_status_and_check_is_end(&mut self, digest: &H256) -> bool {
+
+        for (h, c) in self.status.iter_mut() {
+            if *h == *digest {
+                let approval_count = c.saturating_add(1);
+                if approval_count >= self.threshold {
+                    return true;
+                }
+            } 
+        }
+
+        self.status.push((digest.clone(), 1));
+
+        if self.threshold == 1 {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn update_threshold(&mut self, member_count: usize) {
+        let threshold = (member_count * 3 / 5) as Threshold;
+        let check_sum: Threshold = if (member_count * 3) % 5 == 0 { 0 } else { 1 };
+        if_std! { println!("M => {:?}, T => {:?}, C => {:?}", member_count, threshold, check_sum) };
+        self.threshold = threshold.saturating_add(check_sum);
     }
 }
 
