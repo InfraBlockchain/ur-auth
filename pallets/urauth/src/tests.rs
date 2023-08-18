@@ -33,9 +33,11 @@ fn json_parse_works() {
         }
         _ => {}
     }
+    let did_clone = admin_did.clone();
+    let pk = did_clone.split(':').collect::<Vec<&str>>();
     println!(
-        "도메인 => {:?}, 어드민 => {:?}, 챌린지 => {:?}, 타임스탬프 => {:?}, 프루프 => {:?}",
-        domain, admin_did, challenge, timestamp, proof
+        "도메인 => {:?}, 어드민 => {:?}, 퍼블릭키 => {:?}, 챌린지 => {:?}, 타임스탬프 => {:?}, 프루프 => {:?}",
+        domain, admin_did, pk.last().unwrap(), challenge, timestamp, proof
     );
 }
 
