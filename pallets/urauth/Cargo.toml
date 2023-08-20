@@ -17,6 +17,7 @@ codec = { package = "parity-scale-codec", version = "3.0.0", features = [
 ], default-features = false }
 scale-info = { version = "2.2.0", default-features = false, features = ["derive"] }
 lite-json = { version = "0.2.0", default-features = false }
+safe-regex = "0.2.5"
 
 # Substrate
 frame-benchmarking = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, optional = true, branch = "master" }

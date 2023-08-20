@@ -25,10 +25,15 @@ pub struct DID<Account> {
     pub weight: DIDWeight,
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, Default, RuntimeDebug, TypeInfo)]
 pub struct URI(Vec<u8>);
 
 impl URI {
+
+    pub fn new(raw: Vec<u8>) -> Self {
+        Self(raw)
+    }
+
     pub fn inner(&self) -> Vec<u8> {
         self.0.clone()
     }
@@ -185,7 +190,7 @@ pub enum URAuthSignedPayload<T: Config> {
     },
     Challenge {
         uri: URI,
-        admin_did: OwnerDID,
+        owner_did: OwnerDID,
         challenge: Vec<u8>,
         timestamp: Vec<u8>,
     },
@@ -201,10 +206,10 @@ impl<T: Config> Encode for URAuthSignedPayload<T> {
             URAuthSignedPayload::Request { uri, owner_did } => (uri, owner_did).encode(),
             URAuthSignedPayload::Challenge {
                 uri,
-                admin_did,
+                owner_did,
                 challenge,
                 timestamp,
-            } => (uri, admin_did, challenge, timestamp).encode(),
+            } => (uri, owner_did, challenge, timestamp).encode(),
             URAuthSignedPayload::Update {
                 urauth_doc,
                 owner_did,

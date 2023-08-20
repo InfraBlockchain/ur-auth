@@ -2,6 +2,7 @@
 
 use codec::{Codec, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
+use safe_regex::{regex, Matcher0};
 
 use frame_support::{pallet_prelude::*, BoundedVec};
 
@@ -12,7 +13,7 @@ use sp_runtime::{
     traits::{
         AtLeast32BitUnsigned, BlakeTwo256, Hash, IdentifyAccount, MaybeSerializeDeserialize, Verify,
     },
-    FixedPointOperand, MultiSignature, MultiSigner,
+    FixedPointOperand, MultiSignature, MultiSigner, AccountId32,
 };
 
 pub use pallet::*;
@@ -90,7 +91,6 @@ pub mod pallet {
         URAuthRegisterRequested {
             uri: URI,
         },
-        InvalidChallengeValue,
         URAuthTreeRegistered {
             uri: URI,
             urauth_doc: URAuthDoc<T::AccountId, T::Balance>,
@@ -106,19 +106,22 @@ pub mod pallet {
         BadProof,
         BadSigner,
         ErrorConvertToString,
+        ErrorConvertToAccountId,
         BadChallengeValue,
+        BadRequest,
+        BadSignature,
         NotOracleMember,
         URINotVerfied,
         AccountMissing,
         ChallengeValueNotProvided,
         AlreadySubmitted,
+        InvalidURI
     }
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
         #[pallet::call_index(0)]
         #[pallet::weight(1_000)]
-        // ToDo: Check uri(regex?), owner_did, signer
         pub fn urauth_request_register_domain_owner(
             origin: OriginFor<T>,
             uri: URI,
@@ -128,17 +131,15 @@ pub mod pallet {
             signature: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
+            ensure!(Self::is_valid_uri(&uri.inner()), Error::<T>::InvalidURI);
+
             let urauth_signed_payload = URAuthSignedPayload::<T>::Request {
                 uri: uri.clone(),
                 owner_did: owner_did.clone(),
             };
 
             // Check whether account id of owner did and signer are same
-            let owner_account_id =
-                Self::account_id_from_did(String::from_utf8_lossy(&owner_did).to_string())?;
-            let raw_signer =
-                String::from_utf8_lossy(signer.clone().into_account().as_ref()).to_string();
-            ensure!(owner_account_id == raw_signer, Error::<T>::BadSigner);
+            Self::check_is_valid_owner(&owner_did, signer.clone().into_account().as_ref())?;
 
             // Check signature
             if !urauth_signed_payload
@@ -171,14 +172,12 @@ pub mod pallet {
                 Error::<T>::NotOracleMember
             );
 
-            Self::try_handle_challenge_value(challenge_value)?;
-            // Verification logistics
-            //
+            // Parse json
+            let (sig, raw_payload, uri, signer) = Self::try_handle_challenge_value(challenge_value)?;
+
             // 1. OwnerDID of URI == Challenge Value's DID
             // 2. Verify signature
-            if !Self::do_verify_challenge_value() {
-                Self::deposit_event(Event::<T>::InvalidChallengeValue)
-            }
+            Self::try_verify_challenge_value(sig, raw_payload, uri, signer)?;
 
             // If valid,
             // 1. Store on `Requested::<T>::insert(uri, Vec<(Hash, ApproveCount)>)
@@ -206,14 +205,52 @@ impl<T: Config> Pallet<T> {
         Default::default()
     }
 
-    fn do_verify_challenge_value() -> bool {
-        false
+    fn try_verify_challenge_value(sig: Vec<u8>, raw_payload: Vec<u8>, uri: URI, signer: Vec<u8>) -> Result<(), DispatchError> {
+        let multi_sig = Self::raw_signature_to_multi_sig(&sig)?;
+        let account_id = AccountId32::try_from(&signer[..]).map_err(|_| Error::<T>::ErrorConvertToAccountId)?;
+        if !raw_payload.using_encoded(|m| multi_sig.verify(m, &account_id)) {
+            return Err(Error::<T>::BadProof.into())
+        }
+        let uri_metadata = URIMetadata::<T>::get(&uri).ok_or(Error::<T>::BadRequest)?; 
+        Self::check_is_valid_owner(&uri_metadata.owner_did, &signer).map_err(|_| Error::<T>::BadSigner)?;
+        Ok(())
+    }
+
+    fn check_is_valid_owner(owner_did: &Vec<u8>, signer: &[u8]) -> Result<(), DispatchError> {
+        let owner_account_id =
+            Self::account_id_from_did(owner_did)?;
+        let raw_signer =
+            String::from_utf8_lossy(&signer).to_string().as_bytes().to_vec();
+        ensure!(owner_account_id == raw_signer, Error::<T>::BadSigner);
+        Ok(())
+    }
+
+    fn raw_signature_to_multi_sig(sig: &Vec<u8>) -> Result<MultiSignature, DispatchError> {
+        let full_str_sig = String::from_utf8_lossy(sig).to_string().to_lowercase();
+        if full_str_sig.contains("ed25519") {
+            let sig = ed25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
+            Ok(MultiSignature::Ed25519(sig))
+        } else if full_str_sig.contains("sr25519") {
+            let sig = sr25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
+            Ok(MultiSignature::Sr25519(sig))
+        } else {
+            let sig = ecdsa::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
+            Ok(MultiSignature::Ecdsa(sig))
+        }
+    }
+
+    fn is_valid_uri(_uri: &Vec<u8>) -> bool {
+        let _matcher: Matcher0<_> = regex!(br"");
+        // if !matcher.is_match(&[]) {
+        //     return Err(Error::<T>::InvalidURI.into());
+        // }
+        true
     }
 
     /// Return
     ///
     /// (Signature, RuntimeGereratedProof, AccountId)
-    fn try_handle_challenge_value(challenge_value: Vec<u8>) -> Result<(), DispatchError> {
+    fn try_handle_challenge_value(challenge_value: Vec<u8>) -> Result<(Vec<u8>, Vec<u8>, URI, Vec<u8>), DispatchError> {
         let json_str = sp_std::str::from_utf8(&challenge_value)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
 
@@ -221,43 +258,52 @@ impl<T: Config> Pallet<T> {
             Ok(obj) => match obj {
                 // ToDo: Check domain, admin_did, challenge
                 lite_json::JsonValue::Object(obj) => {
-                    let domain = Self::find_json_value(&obj, String::from("domain"))?
+                    let uri = Self::find_json_value(&obj, String::from("domain"), None)?
                         .ok_or(Error::<T>::BadChallengeValue)?;
-                    let owner_did = Self::find_json_value(&obj, String::from("adminDID"))?
+                    let owner_did = Self::find_json_value(&obj, String::from("adminDID"), None)?
                         .ok_or(Error::<T>::BadChallengeValue)?;
-                    let challenge = Self::find_json_value(&obj, String::from("challenge"))?
+                    let challenge = Self::find_json_value(&obj, String::from("challenge"), None)?
                         .ok_or(Error::<T>::BadChallengeValue)?;
-                    let timestamp = Self::find_json_value(&obj, String::from("timestamp"))?
+                    let timestamp = Self::find_json_value(&obj, String::from("timestamp"), None)?
                         .ok_or(Error::<T>::BadChallengeValue)?;
-                    let proof = Self::find_json_value(&obj, String::from("proof"))?
+                    let proof_type = Self::find_json_value(&obj, String::from("proof"), Some(String::from("type")))?
                         .ok_or(Error::<T>::BadChallengeValue)?;
+                    let proof = Self::find_json_value(&obj, String::from("proof"), Some(String::from("proofValue")))?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+
+                    let mut raw_payload: Vec<u8> = Default::default();
+                    let signer = Self::account_id_from_did(&owner_did)?;
+                    URAuthSignedPayload::<T>::Challenge { uri: URI::new(uri.clone()), owner_did, challenge, timestamp }.using_encoded(|m| raw_payload = m.to_vec());
+
+                    return Ok((proof, raw_payload, URI::new(uri), signer))
                 }
                 _ => return Err(Error::<T>::BadChallengeValue.into()),
             },
             Err(_) => return Err(Error::<T>::BadChallengeValue.into()),
         }
-
-        Ok(())
     }
 
     fn find_json_value(
         json_object: &lite_json::JsonObject,
         field_name: String,
-    ) -> Result<Option<String>, DispatchError> {
+        sub_field: Option<String>,
+    ) -> Result<Option<Vec<u8>>, DispatchError> {
+        let sub = sub_field.map_or("".into(), |s| s);
         let (_, json_value) = json_object
             .iter()
             .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
             .ok_or(Error::<T>::BadChallengeValue)?;
         match json_value {
-            lite_json::JsonValue::String(v) => Ok(Some(v.iter().collect::<String>())),
-            lite_json::JsonValue::Object(v) => Self::find_json_value(v, "proofValue".into()),
+            lite_json::JsonValue::String(v) => Ok(Some(v.iter().collect::<String>().as_bytes().to_vec())),
+            lite_json::JsonValue::Object(v) => Self::find_json_value(v, sub, None),
             _ => Ok(None),
         }
     }
 
-    fn account_id_from_did(owner_did: String) -> Result<String, DispatchError> {
-        let split = owner_did.split(':').collect::<Vec<&str>>();
-        let account_id = split.last().ok_or(Error::<T>::AccountMissing)?;
-        Ok(account_id.to_string())
+    fn account_id_from_did(raw_owner_did: &Vec<u8>) -> Result<Vec<u8>, DispatchError> {
+        let owner_did = String::from_utf8_lossy(raw_owner_did).to_string();
+        let split: Vec<&str> = owner_did.split(':').collect::<Vec<&str>>();
+        let account_id = split.last().ok_or(Error::<T>::AccountMissing)?.clone();
+        Ok(account_id.as_bytes().to_vec())
     }
 }

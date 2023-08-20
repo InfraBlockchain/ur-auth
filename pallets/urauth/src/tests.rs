@@ -74,15 +74,32 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
         .into()
 }
 
-fn find_json_value(json_object: lite_json::JsonObject, field_name: String) -> Option<String> {
+fn find_json_value(
+    json_object: lite_json::JsonObject,
+    field_name: String,
+    sub_field: Option<String>,
+) -> Option<String> {
+    let sub = sub_field.map_or("".into(), |s| s);
     let (_, json_value) = json_object
         .iter()
         .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
         .unwrap();
     match json_value {
         lite_json::JsonValue::String(v) => Some(v.iter().collect::<String>()),
-        lite_json::JsonValue::Object(v) => find_json_value(v.clone(), "proofValue".into()),
+        lite_json::JsonValue::Object(v) => find_json_value(v.clone(), sub, None),
         _ => None,
+    }
+}
+
+fn which_sig(sig: String) -> String {
+    if sig.contains("ed25519") {
+        return "ED25519 SIGNATURE".into()
+    } else if sig.contains("sr25519") {
+        return "SR25519 SIGNATURE".into()
+    } else if sig.contains("ecdsa") {
+        return "ECDSA SIGNATURE".into()
+    } else {
+        return "NONE".into()
     }
 }
 
@@ -110,22 +127,26 @@ fn json_parse_works() {
     let mut admin_did: String = "".into();
     let mut challenge: String = "".into();
     let mut timestamp: String = "".into();
+    let mut proof_type: String = "".into();
     let mut proof: String = "".into();
+
     match json_data {
         JsonValue::Object(obj_value) => {
-            domain = find_json_value(obj_value.clone(), "domain".into()).unwrap();
-            admin_did = find_json_value(obj_value.clone(), "adminDID".into()).unwrap();
-            challenge = find_json_value(obj_value.clone(), "challenge".into()).unwrap();
-            timestamp = find_json_value(obj_value.clone(), "timestamp".into()).unwrap();
-            proof = find_json_value(obj_value.clone(), "proof".into()).unwrap();
+            domain = find_json_value(obj_value.clone(), "domain".into(), None).unwrap();
+            admin_did = find_json_value(obj_value.clone(), "adminDID".into(), None).unwrap();
+            challenge = find_json_value(obj_value.clone(), "challenge".into(), None).unwrap();
+            timestamp = find_json_value(obj_value.clone(), "timestamp".into(), None).unwrap();
+            proof_type = find_json_value(obj_value.clone(), "proof".into(), Some("type".into())).unwrap().to_lowercase();
+            proof = find_json_value(obj_value.clone(), "proof".into(), Some("proofValue".into())).unwrap();
         }
         _ => {}
     }
     let did_clone = admin_did.clone();
     let pk = did_clone.split(':').collect::<Vec<&str>>();
+    println!("Proof type is => {:?}", which_sig(proof_type.clone()));
     println!(
-        "도메인 => {:?}, 어드민 => {:?}, 퍼블릭키 => {:?}, 챌린지 => {:?}, 타임스탬프 => {:?}, 프루프 => {:?}",
-        domain, admin_did, pk.last().unwrap(), challenge, timestamp, proof
+        "도메인 => {:?}, 어드민 => {:?}, 퍼블릭키 => {:?}, 챌린지 => {:?}, 타임스탬프 => {:?}, 프루프 타입 => {:?}, 프루프 => {:?}",
+        domain, admin_did, pk.last().unwrap(), challenge, timestamp, proof_type, proof
     );
 }
 
