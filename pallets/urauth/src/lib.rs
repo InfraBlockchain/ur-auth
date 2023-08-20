@@ -11,7 +11,7 @@ use sp_consensus_vrf::schnorrkel::Randomness;
 use sp_core::*;
 use sp_runtime::{
     traits::{
-        AtLeast32BitUnsigned, BlakeTwo256, Hash, IdentifyAccount, MaybeSerializeDeserialize, Verify,
+        AtLeast32BitUnsigned, BlakeTwo256, IdentifyAccount, MaybeSerializeDeserialize, Verify,
     },
     AccountId32, FixedPointOperand, MultiSignature, MultiSigner,
 };
@@ -99,6 +99,10 @@ pub mod pallet {
             member: T::AccountId,
             digest: H256,
         },
+        VerificationInfo {
+            uri: URI,
+            progress_status: VerificationResult,
+        }
     }
 
     #[pallet::error]
@@ -166,6 +170,7 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         /// ToDo: URI Verification Period
         pub fn verify_challenge(origin: OriginFor<T>, challenge_value: Vec<u8>) -> DispatchResult {
+
             let who = ensure_signed(origin)?;
             ensure!(
                 Self::oracle_members().contains(&who),
@@ -173,27 +178,36 @@ pub mod pallet {
             );
 
             // Parse json
-            let (sig, raw_payload, uri, signer) =
-                Self::try_handle_challenge_value(challenge_value)?;
+            let (sig, proof_type, raw_payload, uri, signer) =
+                Self::try_handle_challenge_value(&challenge_value)?;
 
             // 1. OwnerDID of URI == Challenge Value's DID
             // 2. Verify signature
-            Self::try_verify_challenge_value(sig, raw_payload, uri, signer)?;
-
-            // If valid,
-            // 1. Store on `Requested::<T>::insert(uri, Vec<(Hash, ApproveCount)>)
-            // 2. Other Oracle Nodes will send extrinsic and do same stuff
-            // 3. Check Requested::<T>::get(uri) == Hash'(challenge_value)
-            // 4. If same, Requested::<T>::insert(uri, (Hash, ApproveCount+1))
-            // 5. If not same, Requested::<T>::insert(uri, (Hash', ApproveCount'))
-            // 6. Over 60% of `OracleMembers::<T>` has done, tally
-            // 7. Call register method register_new_urauth_doc(URAuthDoc::new(uri, admin_did, proof?))
-            // IF >= 60% ?:
-            //     do_register()
-            // ELSE:
-            //     DELETE?
-            //     OK(())
-            //
+            Self::try_verify_challenge_value(sig, proof_type, raw_payload, &uri, signer)?;
+            let member_count = Self::oracle_members().len();
+            let mut vs = if let Some(vs) = URIVerificationInfo::<T>::get(&uri) {
+                vs
+            } else {
+                VerificationSubmission::<T>::default()
+            };
+            let res = vs.submit(member_count, (who, BlakeTwo256::hash(&challenge_value)))?;
+            match res {
+                VerificationResult::Complete => { 
+                    // let urauth_doc: URAuthDoc<T::AccountId, T::Balance> = URAuthDoc::new(
+                    //     uri.clone().inner(),
+                    //     uri.clone(),
+                    //     MultiDID::new()
+                    // )
+                },
+                VerificationResult::Tie => { /* Delete data related to 'uri' */ },
+                _ => { /* In progress */ }
+            }
+            Self::deposit_event(
+                Event::<T>::VerificationInfo {
+                    uri,
+                    progress_status: res
+                }
+            );
 
             Ok(())
         }
@@ -208,17 +222,18 @@ impl<T: Config> Pallet<T> {
 
     fn try_verify_challenge_value(
         sig: Vec<u8>,
+        proof_type: Vec<u8>, 
         raw_payload: Vec<u8>,
-        uri: URI,
+        uri: &URI,
         signer: Vec<u8>,
     ) -> Result<(), DispatchError> {
-        let multi_sig = Self::raw_signature_to_multi_sig(&sig)?;
+        let multi_sig = Self::raw_signature_to_multi_sig(&proof_type, &sig)?;
         let account_id =
             AccountId32::try_from(&signer[..]).map_err(|_| Error::<T>::ErrorConvertToAccountId)?;
         if !raw_payload.using_encoded(|m| multi_sig.verify(m, &account_id)) {
             return Err(Error::<T>::BadProof.into());
         }
-        let uri_metadata = URIMetadata::<T>::get(&uri).ok_or(Error::<T>::BadRequest)?;
+        let uri_metadata = URIMetadata::<T>::get(uri).ok_or(Error::<T>::BadRequest)?;
         Self::check_is_valid_owner(&uri_metadata.owner_did, &signer)
             .map_err(|_| Error::<T>::BadSigner)?;
         Ok(())
@@ -234,13 +249,13 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
-    fn raw_signature_to_multi_sig(sig: &Vec<u8>) -> Result<MultiSignature, DispatchError> {
-        let full_str_sig = String::from_utf8_lossy(sig).to_string().to_lowercase();
-        if full_str_sig.contains("ed25519") {
+    fn raw_signature_to_multi_sig(proof_type: &Vec<u8>, sig: &Vec<u8>) -> Result<MultiSignature, DispatchError> {
+        let proof_type = String::from_utf8_lossy(proof_type).to_string().to_lowercase();
+        if proof_type.contains("ed25519") {
             let sig =
                 ed25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
             Ok(MultiSignature::Ed25519(sig))
-        } else if full_str_sig.contains("sr25519") {
+        } else if proof_type.contains("sr25519") {
             let sig =
                 sr25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
             Ok(MultiSignature::Sr25519(sig))
@@ -262,9 +277,9 @@ impl<T: Config> Pallet<T> {
     ///
     /// (Signature, RuntimeGereratedProof, AccountId)
     fn try_handle_challenge_value(
-        challenge_value: Vec<u8>,
-    ) -> Result<(Vec<u8>, Vec<u8>, URI, Vec<u8>), DispatchError> {
-        let json_str = sp_std::str::from_utf8(&challenge_value)
+        challenge_value: &Vec<u8>,
+    ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, URI, Vec<u8>), DispatchError> {
+        let json_str = sp_std::str::from_utf8(challenge_value)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
 
         match lite_json::parse_json(json_str) {
@@ -302,7 +317,7 @@ impl<T: Config> Pallet<T> {
                     }
                     .using_encoded(|m| raw_payload = m.to_vec());
 
-                    return Ok((proof, raw_payload, URI::new(uri), signer));
+                    return Ok((proof, proof_type, raw_payload, URI::new(uri), signer));
                 }
                 _ => return Err(Error::<T>::BadChallengeValue.into()),
             },

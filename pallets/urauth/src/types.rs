@@ -19,12 +19,6 @@ pub enum Status {
     Verfied,
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
-pub struct DID<Account> {
-    pub did: Account,
-    pub weight: DIDWeight,
-}
-
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Default, RuntimeDebug, TypeInfo)]
 pub struct URI(Vec<u8>);
 
@@ -79,6 +73,7 @@ pub enum VerificationResult {
 }
 
 impl<T: Config> VerificationSubmission<T> {
+
     pub fn submit(
         &mut self,
         member_count: usize,
@@ -222,12 +217,35 @@ impl<T: Config> Encode for URAuthSignedPayload<T> {
     }
 }
 
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
+pub struct DID<Account> {
+    pub did: Account,
+    pub weight: DIDWeight,
+}
+
+impl<Account> DID<Account> {
+    pub fn new(acc: Account, weight: DIDWeight) -> Self {
+        Self {
+            did: acc,
+            weight
+        }
+    }
+}
 // Multisig-enabled DID
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct MultiDID<Account> {
     dids: Vec<DID<Account>>,
     // Sum(weight) >= threshold
     threshold: DIDWeight,
+}
+
+impl<Account> MultiDID<Account> {
+    pub fn new(acc: Account, weight: DIDWeight) -> Self {
+        Self {
+            dids: vec![DID::<Account>::new(acc, weight)],
+            threshold: weight
+        }
+    }
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
@@ -291,4 +309,21 @@ pub struct URAuthDoc<Account, Balance> {
     copyright_info: Option<CopyrightInfo>,
     access_rules: Option<Vec<AccessRule<Balance>>>,
     proofs: Option<Proof>,
+}
+
+impl<Account, Balance> URAuthDoc<Account, Balance> {
+    pub fn new(id: DocId, uri: URI, owner_did: MultiDID<Account>) -> Self {
+        Self {
+            id,
+            uri,
+            owner_did,
+            created_at: Default::default(),
+            updated_at: Default::default(),
+            identity_info: None,
+            content_metadata: None,
+            copyright_info: None,
+            access_rules: None,
+            proofs: None,
+        }
+    }
 }
