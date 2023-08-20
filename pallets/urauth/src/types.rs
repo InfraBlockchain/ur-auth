@@ -56,15 +56,32 @@ pub struct VerificationSubmission  {
     pub threshold: Threshold
 }
 
+impl Default for VerificationSubmission {
+    fn default() -> Self {
+        Self {
+            status: Default::default(),
+            threshold: 1
+        }
+    }
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub enum VerificationResult {
+    InProgress,
+    Complete,
+    Tie
+}
+
 impl VerificationSubmission {
 
-    pub fn update_status_and_check_is_end(&mut self, digest: &H256) -> bool {
+    pub fn update_status(&mut self, member_count: usize, digest: &H256) -> VerificationResult {
 
+        self.update_threshold(member_count);
         for (h, c) in self.status.iter_mut() {
             if *h == *digest {
-                let approval_count = c.saturating_add(1);
-                if approval_count >= self.threshold {
-                    return true;
+                *c = c.saturating_add(1);
+                if *c >= self.threshold {
+                    return VerificationResult::Complete;
                 }
             } 
         }
@@ -72,16 +89,17 @@ impl VerificationSubmission {
         self.status.push((digest.clone(), 1));
 
         if self.threshold == 1 {
-            true
+            VerificationResult::Complete
+        } else if self.status.len() == member_count {
+            VerificationResult::Tie
         } else {
-            false
+            VerificationResult::InProgress
         }
     }
 
     pub fn update_threshold(&mut self, member_count: usize) {
         let threshold = (member_count * 3 / 5) as Threshold;
         let check_sum: Threshold = if (member_count * 3) % 5 == 0 { 0 } else { 1 };
-        if_std! { println!("M => {:?}, T => {:?}, C => {:?}", member_count, threshold, check_sum) };
         self.threshold = threshold.saturating_add(check_sum);
     }
 }

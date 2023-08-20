@@ -1,5 +1,5 @@
 
-pub use super::VerificationSubmission;
+pub use super::{VerificationSubmission, VerificationResult};
 
 fn find_json_value(json_object: lite_json::JsonObject, field_name: String) -> Option<String> {
     let (_, json_value) = json_object
@@ -58,7 +58,7 @@ fn json_parse_works() {
 
 #[test]
 fn verification_submission_dynamic_threshold_works() {
-    let mut submission = VerificationSubmission { status: vec![], threshold: 0 };
+    let mut submission: VerificationSubmission = Default::default();
     submission.update_threshold(1);
     assert_eq!(submission.threshold, 1);
     submission.update_threshold(2);
@@ -71,5 +71,34 @@ fn verification_submission_dynamic_threshold_works() {
     assert_eq!(submission.threshold, 3);
 }
 
+#[test]
+fn verfiication_submission_update_status_works() {
+    use sp_runtime::traits::{BlakeTwo256, Hash};
+    
+    // Complete
+    let mut s1: VerificationSubmission = Default::default();
+    let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
+    s1.update_status(3, &h1);
+    let res = s1.update_status(3, &h1);
+    assert_eq!(res, VerificationResult::Complete);
+    println!("{:?}", s1);
+
+    // Tie
+    let mut s2: VerificationSubmission = Default::default();
+    let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
+    let h2 = BlakeTwo256::hash(&2u32.to_le_bytes());
+    let h3 = BlakeTwo256::hash(&3u32.to_le_bytes());
+    let res = s2.update_status(3, &h1);
+    assert_eq!(res, VerificationResult::InProgress);
+    let res = s2.update_status(3, &h2);
+    assert_eq!(res, VerificationResult::InProgress);
+    let res = s2.update_status(3, &h3);
+    assert_eq!(res, VerificationResult::Tie);
+
+    let mut s3: VerificationSubmission = Default::default();
+    let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
+    let res = s3.update_status(1, &h1);
+    assert_eq!(res, VerificationResult::Complete);
+}
 
 
