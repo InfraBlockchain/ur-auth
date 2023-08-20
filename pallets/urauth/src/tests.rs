@@ -1,5 +1,79 @@
 
+pub use crate as pallet_urauth;
+use frame_support::{parameter_types, traits::Everything};
+use sp_core::H256;
+use sp_runtime::{
+    testing::Header,
+    traits::{BlakeTwo256, IdentityLookup},
+};
 pub use super::{VerificationSubmission, VerificationResult};
+
+pub type MockBalance = u128;
+pub type MockAccountId = u64;
+pub type MockBlockNumber = u64;
+
+type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
+type Block = frame_system::mocking::MockBlock<Test>;
+
+frame_support::construct_runtime!(
+    pub enum Test where
+        Block = Block,
+        NodeBlock = Block,
+        UncheckedExtrinsic = UncheckedExtrinsic,
+    {
+        System: frame_system::{Pallet, Call, Config, Storage, Event<T>} = 1,
+        URAuth: pallet_urauth::{Pallet, Call, Storage, Event<T>} = 2,
+    }
+);
+
+parameter_types! {
+    pub const BlockHashCount: u64 = 250;
+    pub const SS58Prefix: u8 = 42;
+}
+
+impl frame_system::Config for Test {
+    type BaseCallFilter = Everything;
+    type BlockWeights = ();
+    type BlockLength = ();
+    type DbWeight = ();
+    type RuntimeOrigin = RuntimeOrigin;
+    type RuntimeCall = RuntimeCall;
+    type Index = u64;
+    type BlockNumber = MockBlockNumber;
+    type Hash = H256;
+    type Hashing = BlakeTwo256;
+    type AccountId = MockAccountId;
+    type Lookup = IdentityLookup<Self::AccountId>;
+    type Header = Header;
+    type RuntimeEvent = RuntimeEvent;
+    type BlockHashCount = BlockHashCount;
+    type Version = ();
+    type PalletInfo = PalletInfo;
+    type AccountData = ();
+    type OnNewAccount = ();
+    type OnKilledAccount = ();
+    type SystemWeightInfo = ();
+    type SS58Prefix = SS58Prefix;
+    type OnSetCode = ();
+    type MaxConsumers = frame_support::traits::ConstU32<16>;
+}
+
+parameter_types! {
+    pub const MaxOracleMemembers: u32 = 5;
+}
+
+impl pallet_urauth::Config for Test {
+    type RuntimeEvent = RuntimeEvent;
+    type Balance = MockBalance;
+    type MaxOracleMemembers = MaxOracleMemembers;
+}
+
+pub fn new_test_ext() -> sp_io::TestExternalities {
+    frame_system::GenesisConfig::default()
+        .build_storage::<Test>()
+        .unwrap()
+        .into()
+}
 
 fn find_json_value(json_object: lite_json::JsonObject, field_name: String) -> Option<String> {
     let (_, json_value) = json_object
@@ -58,7 +132,7 @@ fn json_parse_works() {
 
 #[test]
 fn verification_submission_dynamic_threshold_works() {
-    let mut submission: VerificationSubmission = Default::default();
+    let mut submission: VerificationSubmission<Test> = Default::default();
     submission.update_threshold(1);
     assert_eq!(submission.threshold, 1);
     submission.update_threshold(2);
@@ -76,28 +150,28 @@ fn verfiication_submission_update_status_works() {
     use sp_runtime::traits::{BlakeTwo256, Hash};
     
     // Complete
-    let mut s1: VerificationSubmission = Default::default();
+    let mut s1: VerificationSubmission<Test> = Default::default();
     let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
-    s1.update_status(3, &h1);
-    let res = s1.update_status(3, &h1);
-    assert_eq!(res, VerificationResult::Complete);
+    s1.submit(3, (1, h1)).unwrap();
+    let res = s1.submit(3, (1, h1));
+    assert_eq!(res, Err(sp_runtime::DispatchError::Module(sp_runtime::ModuleError { index: 2, error: [8, 0, 0, 0], message: Some("AlreadySubmitted") }))); 
     println!("{:?}", s1);
 
     // Tie
-    let mut s2: VerificationSubmission = Default::default();
+    let mut s2: VerificationSubmission<Test> = Default::default();
     let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
     let h2 = BlakeTwo256::hash(&2u32.to_le_bytes());
     let h3 = BlakeTwo256::hash(&3u32.to_le_bytes());
-    let res = s2.update_status(3, &h1);
+    let res = s2.submit(3, (1, h1)).unwrap();
     assert_eq!(res, VerificationResult::InProgress);
-    let res = s2.update_status(3, &h2);
+    let res = s2.submit(3, (2, h2)).unwrap();
     assert_eq!(res, VerificationResult::InProgress);
-    let res = s2.update_status(3, &h3);
+    let res = s2.submit(3, (3, h3)).unwrap();
     assert_eq!(res, VerificationResult::Tie);
 
-    let mut s3: VerificationSubmission = Default::default();
+    let mut s3: VerificationSubmission<Test> = Default::default();
     let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
-    let res = s3.update_status(1, &h1);
+    let res = s3.submit(1, (1, h1)).unwrap();
     assert_eq!(res, VerificationResult::Complete);
 }
 

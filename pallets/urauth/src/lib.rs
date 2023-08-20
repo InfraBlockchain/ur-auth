@@ -68,7 +68,7 @@ pub mod pallet {
     #[pallet::unbounded]
     #[pallet::getter(fn uri_verification_info)]
     pub type URIVerificationInfo<T: Config> = 
-        StorageMap<_, Twox128, URI, VerificationSubmission>;
+        StorageMap<_, Twox128, URI, VerificationSubmission<T>>;
 
     #[pallet::storage]
     #[pallet::unbounded]
@@ -89,6 +89,7 @@ pub mod pallet {
         URAuthRegisterRequested { uri: URI },
         InvalidChallengeValue,
         URAuthTreeRegistered { uri: URI, urauth_doc: URAuthDoc<T::AccountId, T::Balance> },
+        VerificationSubmitted { member: T::AccountId, digest: H256 }
     }
 
     #[pallet::error]
@@ -100,7 +101,8 @@ pub mod pallet {
         NotOracleMember,
         URINotVerfied, 
         AccountMissing,
-        ChallengeValueNotProvided
+        ChallengeValueNotProvided, 
+        AlreadySubmitted,
     }
 
     #[pallet::call]
@@ -171,9 +173,9 @@ pub mod pallet {
             // 3. Check Requested::<T>::get(uri) == Hash'(challenge_value)
             // 4. If same, Requested::<T>::insert(uri, (Hash, ApproveCount+1))
             // 5. If not same, Requested::<T>::insert(uri, (Hash', ApproveCount'))
-            // 6. Over 2/3 of `OracleMembers::<T>` has done, tally 
+            // 6. Over 60% of `OracleMembers::<T>` has done, tally 
             // 7. Call register method register_new_urauth_doc(URAuthDoc::new(uri, admin_did, proof?))
-            // IF 2/3?:
+            // IF >= 60% ?:
             //     do_register()
             // ELSE:
             //     DELETE?

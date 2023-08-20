@@ -4,7 +4,7 @@ use super::*;
 use codec::{Encode, Decode, MaxEncodedLen};
 use scale_info::TypeInfo;
 use sp_runtime::RuntimeDebug;
-use sp_std::if_std;
+use sp_std::collections::btree_map::BTreeMap;
 
 pub type DIDWeight = u16;
 pub type OwnerDID = Vec<u8>;
@@ -51,15 +51,16 @@ impl Metadata {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct VerificationSubmission  {
-    pub status: Vec<(H256, ApprovalCount)>,
+#[scale_info(skip_type_params(T))]
+pub struct VerificationSubmission<T: Config> {
+    pub submission: Vec<(T::AccountId, H256)>,
     pub threshold: Threshold
 }
 
-impl Default for VerificationSubmission {
+impl<T: Config> Default for VerificationSubmission<T> {
     fn default() -> Self {
         Self {
-            status: Default::default(),
+            submission: Default::default(),
             threshold: 1
         }
     }
@@ -72,25 +73,38 @@ pub enum VerificationResult {
     Tie
 }
 
-impl VerificationSubmission {
+impl<T: Config> VerificationSubmission<T> {
 
-    pub fn update_status(&mut self, member_count: usize, digest: &H256) -> VerificationResult {
+    pub fn submit(&mut self, member_count: usize, submission: (T::AccountId, H256)) -> Result<VerificationResult, DispatchError> {
 
         self.update_threshold(member_count);
-        for (h, c) in self.status.iter_mut() {
-            if *h == *digest {
-                *c = c.saturating_add(1);
-                if *c >= self.threshold {
-                    return VerificationResult::Complete;
-                }
-            } 
+        for (acc, h) in self.submission.iter() {
+            if &submission.0 == acc {
+                return Err(Error::<T>::AlreadySubmitted.into());
+            }
+        }
+        self.submission.push(submission);
+        Ok(self.check_is_end(member_count))
+    }
+
+    fn check_is_end(&self, member_count: usize) -> VerificationResult {
+        let mut map: BTreeMap<H256, ApprovalCount> = BTreeMap::new();
+        let mut is_end = false;
+        for (_, c) in self.submission.iter() {
+            map.entry(*c).and_modify(|v| { 
+                *v = v.saturating_add(1);
+                if *v >= self.threshold { is_end = true; }
+            })
+            .or_insert(1);
         }
 
-        self.status.push((digest.clone(), 1));
+        if is_end {
+            return VerificationResult::Complete
+        }
 
         if self.threshold == 1 {
             VerificationResult::Complete
-        } else if self.status.len() == member_count {
+        } else if self.submission.len() == member_count {
             VerificationResult::Tie
         } else {
             VerificationResult::InProgress
