@@ -1,4 +1,4 @@
-
+pub use super::{VerificationResult, VerificationSubmission};
 pub use crate as pallet_urauth;
 use frame_support::{parameter_types, traits::Everything};
 use sp_core::H256;
@@ -6,7 +6,6 @@ use sp_runtime::{
     testing::Header,
     traits::{BlakeTwo256, IdentityLookup},
 };
-pub use super::{VerificationSubmission, VerificationResult};
 
 pub type MockBalance = u128;
 pub type MockAccountId = u64;
@@ -148,13 +147,20 @@ fn verification_submission_dynamic_threshold_works() {
 #[test]
 fn verfiication_submission_update_status_works() {
     use sp_runtime::traits::{BlakeTwo256, Hash};
-    
+
     // Complete
     let mut s1: VerificationSubmission<Test> = Default::default();
     let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
     s1.submit(3, (1, h1)).unwrap();
     let res = s1.submit(3, (1, h1));
-    assert_eq!(res, Err(sp_runtime::DispatchError::Module(sp_runtime::ModuleError { index: 2, error: [8, 0, 0, 0], message: Some("AlreadySubmitted") }))); 
+    assert_eq!(
+        res,
+        Err(sp_runtime::DispatchError::Module(sp_runtime::ModuleError {
+            index: 2,
+            error: [8, 0, 0, 0],
+            message: Some("AlreadySubmitted")
+        }))
+    );
     println!("{:?}", s1);
 
     // Tie
@@ -169,10 +175,9 @@ fn verfiication_submission_update_status_works() {
     let res = s2.submit(3, (3, h3)).unwrap();
     assert_eq!(res, VerificationResult::Tie);
 
+    // 1 member and submit
     let mut s3: VerificationSubmission<Test> = Default::default();
     let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
     let res = s3.submit(1, (1, h1)).unwrap();
     assert_eq!(res, VerificationResult::Complete);
 }
-
-

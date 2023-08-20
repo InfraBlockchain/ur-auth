@@ -1,7 +1,6 @@
-
 use super::*;
 
-use codec::{Encode, Decode, MaxEncodedLen};
+use codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
 use sp_runtime::RuntimeDebug;
 use sp_std::collections::btree_map::BTreeMap;
@@ -17,7 +16,7 @@ pub type Threshold = u32;
 pub enum Status {
     #[default]
     Requested,
-    Verfied
+    Verfied,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
@@ -45,7 +44,9 @@ pub struct Metadata {
 impl Metadata {
     pub fn new(uri: Vec<u8>, owner_did: Vec<u8>, challenge_value: Randomness) -> Self {
         Self {
-            uri, owner_did, challenge_value
+            uri,
+            owner_did,
+            challenge_value,
         }
     }
 }
@@ -54,14 +55,14 @@ impl Metadata {
 #[scale_info(skip_type_params(T))]
 pub struct VerificationSubmission<T: Config> {
     pub submission: Vec<(T::AccountId, H256)>,
-    pub threshold: Threshold
+    pub threshold: Threshold,
 }
 
 impl<T: Config> Default for VerificationSubmission<T> {
     fn default() -> Self {
         Self {
             submission: Default::default(),
-            threshold: 1
+            threshold: 1,
         }
     }
 }
@@ -70,13 +71,15 @@ impl<T: Config> Default for VerificationSubmission<T> {
 pub enum VerificationResult {
     InProgress,
     Complete,
-    Tie
+    Tie,
 }
 
 impl<T: Config> VerificationSubmission<T> {
-
-    pub fn submit(&mut self, member_count: usize, submission: (T::AccountId, H256)) -> Result<VerificationResult, DispatchError> {
-
+    pub fn submit(
+        &mut self,
+        member_count: usize,
+        submission: (T::AccountId, H256),
+    ) -> Result<VerificationResult, DispatchError> {
         self.update_threshold(member_count);
         for (acc, h) in self.submission.iter() {
             if &submission.0 == acc {
@@ -91,15 +94,18 @@ impl<T: Config> VerificationSubmission<T> {
         let mut map: BTreeMap<H256, ApprovalCount> = BTreeMap::new();
         let mut is_end = false;
         for (_, c) in self.submission.iter() {
-            map.entry(*c).and_modify(|v| { 
-                *v = v.saturating_add(1);
-                if *v >= self.threshold { is_end = true; }
-            })
-            .or_insert(1);
+            map.entry(*c)
+                .and_modify(|v| {
+                    *v = v.saturating_add(1);
+                    if *v >= self.threshold {
+                        is_end = true;
+                    }
+                })
+                .or_insert(1);
         }
 
         if is_end {
-            return VerificationResult::Complete
+            return VerificationResult::Complete;
         }
 
         if self.threshold == 1 {
@@ -128,7 +134,14 @@ impl Default for ChallengeValueConfig {
     fn default() -> Self {
         Self {
             is_calc_enabled: false,
-            challenge_value_fields: [ChallengeValueField::URI, ChallengeValueField::OwnerDID, ChallengeValueField::Challenge, ChallengeValueField::Timestamp, ChallengeValueField::Proof].to_vec()
+            challenge_value_fields: [
+                ChallengeValueField::URI,
+                ChallengeValueField::OwnerDID,
+                ChallengeValueField::Challenge,
+                ChallengeValueField::Timestamp,
+                ChallengeValueField::Proof,
+            ]
+            .to_vec(),
         }
     }
 }
@@ -149,7 +162,7 @@ pub enum ChallengeValueField {
     OwnerDID,
     Challenge,
     Timestamp,
-    Proof
+    Proof,
 }
 
 impl From<ChallengeValueField> for String {
@@ -159,7 +172,7 @@ impl From<ChallengeValueField> for String {
             ChallengeValueField::OwnerDID => "ownerDID".into(),
             ChallengeValueField::Challenge => "challenge".into(),
             ChallengeValueField::Timestamp => "timestamp".into(),
-            ChallengeValueField::Proof => "proof".into()
+            ChallengeValueField::Proof => "proof".into(),
         }
     }
 }
@@ -227,7 +240,7 @@ pub enum CopyrightInfo {
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct AccessRule<Balance> {
     path: Vec<u8>, // e.g "/public"
-    rules: Vec<Rule<Balance>>, 
+    rules: Vec<Rule<Balance>>,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
@@ -235,7 +248,7 @@ pub struct UserAgent(Vec<u8>);
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct Rule<Balance> {
-    user_agents: Vec<UserAgent>, // e.g "GPTBot"
+    user_agents: Vec<UserAgent>,                     // e.g "GPTBot"
     allow: Vec<(ContentType, Balance, ContentSize)>, // e.g (Image, 1DUSD/MB)
     disallow: Vec<ContentType>,
 }
@@ -243,7 +256,7 @@ pub struct Rule<Balance> {
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum ContentSize {
     Mega,
-    Giga
+    Giga,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]

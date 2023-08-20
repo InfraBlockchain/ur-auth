@@ -3,14 +3,16 @@
 use codec::{Codec, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
 
-use frame_support::{pallet_prelude::*, BoundedVec };
+use frame_support::{pallet_prelude::*, BoundedVec};
 
 use frame_system::pallet_prelude::*;
 use sp_consensus_vrf::schnorrkel::Randomness;
 use sp_core::*;
 use sp_runtime::{
-    traits::{AtLeast32BitUnsigned, IdentifyAccount, MaybeSerializeDeserialize, Verify, BlakeTwo256, Hash},
-    FixedPointOperand, MultiSignature, MultiSigner, 
+    traits::{
+        AtLeast32BitUnsigned, BlakeTwo256, Hash, IdentifyAccount, MaybeSerializeDeserialize, Verify,
+    },
+    FixedPointOperand, MultiSignature, MultiSigner,
 };
 
 pub use pallet::*;
@@ -61,13 +63,12 @@ pub mod pallet {
 
     #[pallet::storage]
     #[pallet::unbounded]
-    pub type URIMetadata<T: Config> = 
-        StorageMap<_, Twox128, URI, Metadata, OptionQuery>;
+    pub type URIMetadata<T: Config> = StorageMap<_, Twox128, URI, Metadata, OptionQuery>;
 
     #[pallet::storage]
     #[pallet::unbounded]
     #[pallet::getter(fn uri_verification_info)]
-    pub type URIVerificationInfo<T: Config> = 
+    pub type URIVerificationInfo<T: Config> =
         StorageMap<_, Twox128, URI, VerificationSubmission<T>>;
 
     #[pallet::storage]
@@ -86,10 +87,18 @@ pub mod pallet {
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
-        URAuthRegisterRequested { uri: URI },
+        URAuthRegisterRequested {
+            uri: URI,
+        },
         InvalidChallengeValue,
-        URAuthTreeRegistered { uri: URI, urauth_doc: URAuthDoc<T::AccountId, T::Balance> },
-        VerificationSubmitted { member: T::AccountId, digest: H256 }
+        URAuthTreeRegistered {
+            uri: URI,
+            urauth_doc: URAuthDoc<T::AccountId, T::Balance>,
+        },
+        VerificationSubmitted {
+            member: T::AccountId,
+            digest: H256,
+        },
     }
 
     #[pallet::error]
@@ -99,15 +108,14 @@ pub mod pallet {
         ErrorConvertToString,
         BadChallengeValue,
         NotOracleMember,
-        URINotVerfied, 
+        URINotVerfied,
         AccountMissing,
-        ChallengeValueNotProvided, 
+        ChallengeValueNotProvided,
         AlreadySubmitted,
     }
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-
         #[pallet::call_index(0)]
         #[pallet::weight(1_000)]
         // ToDo: Check uri(regex?), owner_did, signer
@@ -126,11 +134,13 @@ pub mod pallet {
             };
 
             // Check whether account id of owner did and signer are same
-            let owner_account_id = Self::account_id_from_did(String::from_utf8_lossy(&owner_did).to_string())?;
-            let raw_signer = String::from_utf8_lossy(signer.clone().into_account().as_ref()).to_string();
+            let owner_account_id =
+                Self::account_id_from_did(String::from_utf8_lossy(&owner_did).to_string())?;
+            let raw_signer =
+                String::from_utf8_lossy(signer.clone().into_account().as_ref()).to_string();
             ensure!(owner_account_id == raw_signer, Error::<T>::BadSigner);
-            
-            // Check signature 
+
+            // Check signature
             if !urauth_signed_payload
                 .using_encoded(|payload| signature.verify(payload, &signer.into_account()))
             {
@@ -142,7 +152,7 @@ pub mod pallet {
             } else {
                 challenge_value.ok_or(Error::<T>::ChallengeValueNotProvided)?
             };
-        
+
             ChallengeValue::<T>::insert(&uri, cv);
             URIMetadata::<T>::insert(&uri, Metadata::new(uri.inner(), owner_did.clone(), cv));
 
@@ -156,15 +166,18 @@ pub mod pallet {
         /// ToDo: URI Verification Period
         pub fn verify_challenge(origin: OriginFor<T>, challenge_value: Vec<u8>) -> DispatchResult {
             let who = ensure_signed(origin)?;
-            ensure!(Self::oracle_members().contains(&who), Error::<T>::NotOracleMember);
+            ensure!(
+                Self::oracle_members().contains(&who),
+                Error::<T>::NotOracleMember
+            );
 
             Self::try_handle_challenge_value(challenge_value)?;
             // Verification logistics
-            // 
+            //
             // 1. OwnerDID of URI == Challenge Value's DID
             // 2. Verify signature
             if !Self::do_verify_challenge_value() {
-                Self::deposit_event(Event::<T>::InvalidChallengeValue )
+                Self::deposit_event(Event::<T>::InvalidChallengeValue)
             }
 
             // If valid,
@@ -173,14 +186,14 @@ pub mod pallet {
             // 3. Check Requested::<T>::get(uri) == Hash'(challenge_value)
             // 4. If same, Requested::<T>::insert(uri, (Hash, ApproveCount+1))
             // 5. If not same, Requested::<T>::insert(uri, (Hash', ApproveCount'))
-            // 6. Over 60% of `OracleMembers::<T>` has done, tally 
+            // 6. Over 60% of `OracleMembers::<T>` has done, tally
             // 7. Call register method register_new_urauth_doc(URAuthDoc::new(uri, admin_did, proof?))
             // IF >= 60% ?:
             //     do_register()
             // ELSE:
             //     DELETE?
             //     OK(())
-            // 
+            //
 
             Ok(())
         }
@@ -198,21 +211,26 @@ impl<T: Config> Pallet<T> {
     }
 
     /// Return
-    /// 
+    ///
     /// (Signature, RuntimeGereratedProof, AccountId)
     fn try_handle_challenge_value(challenge_value: Vec<u8>) -> Result<(), DispatchError> {
         let json_str = sp_std::str::from_utf8(&challenge_value)
-                .map_err(|_| Error::<T>::ErrorConvertToString)?;
+            .map_err(|_| Error::<T>::ErrorConvertToString)?;
 
         match lite_json::parse_json(json_str) {
             Ok(obj) => match obj {
                 // ToDo: Check domain, admin_did, challenge
                 lite_json::JsonValue::Object(obj) => {
-                    let domain = Self::find_json_value(&obj, String::from("domain"))?.ok_or(Error::<T>::BadChallengeValue)?;
-                    let owner_did = Self::find_json_value(&obj, String::from("adminDID"))?.ok_or(Error::<T>::BadChallengeValue)?;
-                    let challenge = Self::find_json_value(&obj, String::from("challenge"))?.ok_or(Error::<T>::BadChallengeValue)?;
-                    let timestamp = Self::find_json_value(&obj, String::from("timestamp"))?.ok_or(Error::<T>::BadChallengeValue)?;
-                    let proof = Self::find_json_value(&obj, String::from("proof"))?.ok_or(Error::<T>::BadChallengeValue)?;
+                    let domain = Self::find_json_value(&obj, String::from("domain"))?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let owner_did = Self::find_json_value(&obj, String::from("adminDID"))?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let challenge = Self::find_json_value(&obj, String::from("challenge"))?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let timestamp = Self::find_json_value(&obj, String::from("timestamp"))?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let proof = Self::find_json_value(&obj, String::from("proof"))?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
                 }
                 _ => return Err(Error::<T>::BadChallengeValue.into()),
             },
@@ -232,9 +250,7 @@ impl<T: Config> Pallet<T> {
             .ok_or(Error::<T>::BadChallengeValue)?;
         match json_value {
             lite_json::JsonValue::String(v) => Ok(Some(v.iter().collect::<String>())),
-            lite_json::JsonValue::Object(v) => {
-                Self::find_json_value(v, "proofValue".into())
-            }
+            lite_json::JsonValue::Object(v) => Self::find_json_value(v, "proofValue".into()),
             _ => Ok(None),
         }
     }
@@ -242,6 +258,6 @@ impl<T: Config> Pallet<T> {
     fn account_id_from_did(owner_did: String) -> Result<String, DispatchError> {
         let split = owner_did.split(':').collect::<Vec<&str>>();
         let account_id = split.last().ok_or(Error::<T>::AccountMissing)?;
-        Ok(account_id.to_string())  
+        Ok(account_id.to_string())
     }
 }
