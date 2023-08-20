@@ -29,7 +29,6 @@ pub struct DID<Account> {
 pub struct URI(Vec<u8>);
 
 impl URI {
-
     pub fn new(raw: Vec<u8>) -> Self {
         Self(raw)
     }

@@ -93,13 +93,13 @@ fn find_json_value(
 
 fn which_sig(sig: String) -> String {
     if sig.contains("ed25519") {
-        return "ED25519 SIGNATURE".into()
+        return "ED25519 SIGNATURE".into();
     } else if sig.contains("sr25519") {
-        return "SR25519 SIGNATURE".into()
+        return "SR25519 SIGNATURE".into();
     } else if sig.contains("ecdsa") {
-        return "ECDSA SIGNATURE".into()
+        return "ECDSA SIGNATURE".into();
     } else {
-        return "NONE".into()
+        return "NONE".into();
     }
 }
 
@@ -136,8 +136,11 @@ fn json_parse_works() {
             admin_did = find_json_value(obj_value.clone(), "adminDID".into(), None).unwrap();
             challenge = find_json_value(obj_value.clone(), "challenge".into(), None).unwrap();
             timestamp = find_json_value(obj_value.clone(), "timestamp".into(), None).unwrap();
-            proof_type = find_json_value(obj_value.clone(), "proof".into(), Some("type".into())).unwrap().to_lowercase();
-            proof = find_json_value(obj_value.clone(), "proof".into(), Some("proofValue".into())).unwrap();
+            proof_type = find_json_value(obj_value.clone(), "proof".into(), Some("type".into()))
+                .unwrap()
+                .to_lowercase();
+            proof = find_json_value(obj_value.clone(), "proof".into(), Some("proofValue".into()))
+                .unwrap();
         }
         _ => {}
     }

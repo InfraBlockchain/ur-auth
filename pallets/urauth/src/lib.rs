@@ -1,8 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::{Codec, Encode, MaxEncodedLen};
-use scale_info::TypeInfo;
 use safe_regex::{regex, Matcher0};
+use scale_info::TypeInfo;
 
 use frame_support::{pallet_prelude::*, BoundedVec};
 
@@ -13,7 +13,7 @@ use sp_runtime::{
     traits::{
         AtLeast32BitUnsigned, BlakeTwo256, Hash, IdentifyAccount, MaybeSerializeDeserialize, Verify,
     },
-    FixedPointOperand, MultiSignature, MultiSigner, AccountId32,
+    AccountId32, FixedPointOperand, MultiSignature, MultiSigner,
 };
 
 pub use pallet::*;
@@ -115,7 +115,7 @@ pub mod pallet {
         AccountMissing,
         ChallengeValueNotProvided,
         AlreadySubmitted,
-        InvalidURI
+        InvalidURI,
     }
 
     #[pallet::call]
@@ -173,7 +173,8 @@ pub mod pallet {
             );
 
             // Parse json
-            let (sig, raw_payload, uri, signer) = Self::try_handle_challenge_value(challenge_value)?;
+            let (sig, raw_payload, uri, signer) =
+                Self::try_handle_challenge_value(challenge_value)?;
 
             // 1. OwnerDID of URI == Challenge Value's DID
             // 2. Verify signature
@@ -205,22 +206,30 @@ impl<T: Config> Pallet<T> {
         Default::default()
     }
 
-    fn try_verify_challenge_value(sig: Vec<u8>, raw_payload: Vec<u8>, uri: URI, signer: Vec<u8>) -> Result<(), DispatchError> {
+    fn try_verify_challenge_value(
+        sig: Vec<u8>,
+        raw_payload: Vec<u8>,
+        uri: URI,
+        signer: Vec<u8>,
+    ) -> Result<(), DispatchError> {
         let multi_sig = Self::raw_signature_to_multi_sig(&sig)?;
-        let account_id = AccountId32::try_from(&signer[..]).map_err(|_| Error::<T>::ErrorConvertToAccountId)?;
+        let account_id =
+            AccountId32::try_from(&signer[..]).map_err(|_| Error::<T>::ErrorConvertToAccountId)?;
         if !raw_payload.using_encoded(|m| multi_sig.verify(m, &account_id)) {
-            return Err(Error::<T>::BadProof.into())
+            return Err(Error::<T>::BadProof.into());
         }
-        let uri_metadata = URIMetadata::<T>::get(&uri).ok_or(Error::<T>::BadRequest)?; 
-        Self::check_is_valid_owner(&uri_metadata.owner_did, &signer).map_err(|_| Error::<T>::BadSigner)?;
+        let uri_metadata = URIMetadata::<T>::get(&uri).ok_or(Error::<T>::BadRequest)?;
+        Self::check_is_valid_owner(&uri_metadata.owner_did, &signer)
+            .map_err(|_| Error::<T>::BadSigner)?;
         Ok(())
     }
 
     fn check_is_valid_owner(owner_did: &Vec<u8>, signer: &[u8]) -> Result<(), DispatchError> {
-        let owner_account_id =
-            Self::account_id_from_did(owner_did)?;
-        let raw_signer =
-            String::from_utf8_lossy(&signer).to_string().as_bytes().to_vec();
+        let owner_account_id = Self::account_id_from_did(owner_did)?;
+        let raw_signer = String::from_utf8_lossy(&signer)
+            .to_string()
+            .as_bytes()
+            .to_vec();
         ensure!(owner_account_id == raw_signer, Error::<T>::BadSigner);
         Ok(())
     }
@@ -228,10 +237,12 @@ impl<T: Config> Pallet<T> {
     fn raw_signature_to_multi_sig(sig: &Vec<u8>) -> Result<MultiSignature, DispatchError> {
         let full_str_sig = String::from_utf8_lossy(sig).to_string().to_lowercase();
         if full_str_sig.contains("ed25519") {
-            let sig = ed25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
+            let sig =
+                ed25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
             Ok(MultiSignature::Ed25519(sig))
         } else if full_str_sig.contains("sr25519") {
-            let sig = sr25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
+            let sig =
+                sr25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
             Ok(MultiSignature::Sr25519(sig))
         } else {
             let sig = ecdsa::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
@@ -250,7 +261,9 @@ impl<T: Config> Pallet<T> {
     /// Return
     ///
     /// (Signature, RuntimeGereratedProof, AccountId)
-    fn try_handle_challenge_value(challenge_value: Vec<u8>) -> Result<(Vec<u8>, Vec<u8>, URI, Vec<u8>), DispatchError> {
+    fn try_handle_challenge_value(
+        challenge_value: Vec<u8>,
+    ) -> Result<(Vec<u8>, Vec<u8>, URI, Vec<u8>), DispatchError> {
         let json_str = sp_std::str::from_utf8(&challenge_value)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
 
@@ -266,16 +279,30 @@ impl<T: Config> Pallet<T> {
                         .ok_or(Error::<T>::BadChallengeValue)?;
                     let timestamp = Self::find_json_value(&obj, String::from("timestamp"), None)?
                         .ok_or(Error::<T>::BadChallengeValue)?;
-                    let proof_type = Self::find_json_value(&obj, String::from("proof"), Some(String::from("type")))?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let proof = Self::find_json_value(&obj, String::from("proof"), Some(String::from("proofValue")))?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let proof_type = Self::find_json_value(
+                        &obj,
+                        String::from("proof"),
+                        Some(String::from("type")),
+                    )?
+                    .ok_or(Error::<T>::BadChallengeValue)?;
+                    let proof = Self::find_json_value(
+                        &obj,
+                        String::from("proof"),
+                        Some(String::from("proofValue")),
+                    )?
+                    .ok_or(Error::<T>::BadChallengeValue)?;
 
                     let mut raw_payload: Vec<u8> = Default::default();
                     let signer = Self::account_id_from_did(&owner_did)?;
-                    URAuthSignedPayload::<T>::Challenge { uri: URI::new(uri.clone()), owner_did, challenge, timestamp }.using_encoded(|m| raw_payload = m.to_vec());
+                    URAuthSignedPayload::<T>::Challenge {
+                        uri: URI::new(uri.clone()),
+                        owner_did,
+                        challenge,
+                        timestamp,
+                    }
+                    .using_encoded(|m| raw_payload = m.to_vec());
 
-                    return Ok((proof, raw_payload, URI::new(uri), signer))
+                    return Ok((proof, raw_payload, URI::new(uri), signer));
                 }
                 _ => return Err(Error::<T>::BadChallengeValue.into()),
             },
@@ -294,7 +321,9 @@ impl<T: Config> Pallet<T> {
             .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
             .ok_or(Error::<T>::BadChallengeValue)?;
         match json_value {
-            lite_json::JsonValue::String(v) => Ok(Some(v.iter().collect::<String>().as_bytes().to_vec())),
+            lite_json::JsonValue::String(v) => {
+                Ok(Some(v.iter().collect::<String>().as_bytes().to_vec()))
+            }
             lite_json::JsonValue::Object(v) => Self::find_json_value(v, sub, None),
             _ => Ok(None),
         }
