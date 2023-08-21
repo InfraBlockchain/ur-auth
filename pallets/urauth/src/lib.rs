@@ -11,7 +11,7 @@ use sp_consensus_vrf::schnorrkel::Randomness;
 use sp_core::*;
 use sp_runtime::{
     traits::{
-        AtLeast32BitUnsigned, BlakeTwo256, IdentifyAccount, MaybeSerializeDeserialize, Verify,
+        AtLeast32BitUnsigned, BlakeTwo256, IdentifyAccount, MaybeSerializeDeserialize, Verify, 
     },
     AccountId32, FixedPointOperand, MultiSignature, MultiSigner,
 };
@@ -102,6 +102,9 @@ pub mod pallet {
         VerificationInfo {
             uri: URI,
             progress_status: VerificationResult,
+        },
+        URIRemoved {
+            uri: URI
         }
     }
 
@@ -109,11 +112,13 @@ pub mod pallet {
     pub enum Error<T> {
         BadProof,
         BadSigner,
-        ErrorConvertToString,
-        ErrorConvertToAccountId,
         BadChallengeValue,
         BadRequest,
-        BadSignature,
+        ErrorConvertToString,
+        ErrorConvertToAccountId,
+        ErrorConvertToSignature,
+        ErrorDecodeBs58,
+        ErrorDecodeAccountId,
         NotOracleMember,
         URINotVerfied,
         AccountMissing,
@@ -143,7 +148,8 @@ pub mod pallet {
             };
 
             // Check whether account id of owner did and signer are same
-            Self::check_is_valid_owner(&owner_did, signer.clone().into_account().as_ref())?;
+            let signer_account_id = Self::account_id_from_source(AccountIdSource::AccountId32(signer.clone().into_account()))?;
+            Self::check_is_valid_owner(&owner_did, &signer_account_id)?;
 
             // Check signature
             if !urauth_signed_payload
@@ -178,12 +184,12 @@ pub mod pallet {
             );
 
             // Parse json
-            let (sig, proof_type, raw_payload, uri, signer) =
+            let (sig, proof_type, raw_payload, uri, raw_owner_did) =
                 Self::try_handle_challenge_value(&challenge_value)?;
 
             // 1. OwnerDID of URI == Challenge Value's DID
             // 2. Verify signature
-            Self::try_verify_challenge_value(sig, proof_type, raw_payload, &uri, signer)?;
+            let owner = Self::try_verify_challenge_value(sig, proof_type, raw_payload, &uri, &raw_owner_did)?;
             let member_count = Self::oracle_members().len();
             let mut vs = if let Some(vs) = URIVerificationInfo::<T>::get(&uri) {
                 vs
@@ -192,14 +198,21 @@ pub mod pallet {
             };
             let res = vs.submit(member_count, (who, BlakeTwo256::hash(&challenge_value)))?;
             match res {
-                VerificationResult::Complete => { 
-                    // let urauth_doc: URAuthDoc<T::AccountId, T::Balance> = URAuthDoc::new(
-                    //     uri.clone().inner(),
-                    //     uri.clone(),
-                    //     MultiDID::new()
-                    // )
+                VerificationResult::Complete => {
+                    let urauth_doc: URAuthDoc<T::AccountId, T::Balance> = URAuthDoc::new(
+                        Self::doc_id(),
+                        uri.clone(),
+                        MultiDID::new(owner, 1)
+                    );
+                    URAuthTree::<T>::insert(&uri, urauth_doc.clone());
+                    Self::deposit_event(
+                        Event::<T>::URAuthTreeRegistered {
+                            uri: uri.clone(),
+                            urauth_doc
+                        }
+                    )
                 },
-                VerificationResult::Tie => { /* Delete data related to 'uri' */ },
+                VerificationResult::Tie => { Self::remove_all_uri_related(uri.clone()) },
                 _ => { /* In progress */ }
             }
             Self::deposit_event(
@@ -215,6 +228,12 @@ pub mod pallet {
 }
 
 impl<T: Config> Pallet<T> {
+
+    fn doc_id() -> [u8; 16] {
+        let uuid = nuuid::Uuid::new_v4();
+        uuid.to_bytes()
+    }
+
     // ToDo
     fn challenge_value() -> Randomness {
         Default::default()
@@ -225,27 +244,23 @@ impl<T: Config> Pallet<T> {
         proof_type: Vec<u8>, 
         raw_payload: Vec<u8>,
         uri: &URI,
-        signer: Vec<u8>,
-    ) -> Result<(), DispatchError> {
+        raw_owner_did: &Vec<u8>,
+    ) -> Result<T::AccountId, DispatchError> {
         let multi_sig = Self::raw_signature_to_multi_sig(&proof_type, &sig)?;
-        let account_id =
-            AccountId32::try_from(&signer[..]).map_err(|_| Error::<T>::ErrorConvertToAccountId)?;
-        if !raw_payload.using_encoded(|m| multi_sig.verify(m, &account_id)) {
+        let signer = Self::account_id32_from_raw_did(raw_owner_did.clone())?;
+        if !raw_payload.using_encoded(|m| multi_sig.verify(m, &signer)) {
             return Err(Error::<T>::BadProof.into());
         }
         let uri_metadata = URIMetadata::<T>::get(uri).ok_or(Error::<T>::BadRequest)?;
+        let signer = Self::account_id_from_source(AccountIdSource::DID(raw_owner_did.clone()))?;
         Self::check_is_valid_owner(&uri_metadata.owner_did, &signer)
             .map_err(|_| Error::<T>::BadSigner)?;
-        Ok(())
+        Ok(signer)
     }
 
-    fn check_is_valid_owner(owner_did: &Vec<u8>, signer: &[u8]) -> Result<(), DispatchError> {
-        let owner_account_id = Self::account_id_from_did(owner_did)?;
-        let raw_signer = String::from_utf8_lossy(&signer)
-            .to_string()
-            .as_bytes()
-            .to_vec();
-        ensure!(owner_account_id == raw_signer, Error::<T>::BadSigner);
+    fn check_is_valid_owner(raw_owner_did: &Vec<u8>, signer: &T::AccountId) -> Result<(), DispatchError> {
+        let owner_account_id = Self::account_id_from_source(AccountIdSource::DID(raw_owner_did.clone()))?;
+        ensure!(&owner_account_id == signer, Error::<T>::BadSigner);
         Ok(())
     }
 
@@ -253,17 +268,25 @@ impl<T: Config> Pallet<T> {
         let proof_type = String::from_utf8_lossy(proof_type).to_string().to_lowercase();
         if proof_type.contains("ed25519") {
             let sig =
-                ed25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
+                ed25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
             Ok(MultiSignature::Ed25519(sig))
         } else if proof_type.contains("sr25519") {
             let sig =
-                sr25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
+                sr25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
             Ok(MultiSignature::Sr25519(sig))
         } else {
-            let sig = ecdsa::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::BadSignature)?;
+            let sig = ecdsa::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
             Ok(MultiSignature::Ecdsa(sig))
         }
     }
+
+    fn remove_all_uri_related(uri: URI) {
+        URIMetadata::<T>::remove(&uri);
+        URIVerificationInfo::<T>::remove(&uri);
+        ChallengeValue::<T>::remove(&uri);
+
+        Self::deposit_event(Event::<T>::URIRemoved { uri })
+    } 
 
     fn is_valid_uri(_uri: &Vec<u8>) -> bool {
         let _matcher: Matcher0<_> = regex!(br"");
@@ -308,7 +331,7 @@ impl<T: Config> Pallet<T> {
                     .ok_or(Error::<T>::BadChallengeValue)?;
 
                     let mut raw_payload: Vec<u8> = Default::default();
-                    let signer = Self::account_id_from_did(&owner_did)?;
+                    let raw_owner_did = owner_did.clone();
                     URAuthSignedPayload::<T>::Challenge {
                         uri: URI::new(uri.clone()),
                         owner_did,
@@ -317,7 +340,7 @@ impl<T: Config> Pallet<T> {
                     }
                     .using_encoded(|m| raw_payload = m.to_vec());
 
-                    return Ok((proof, proof_type, raw_payload, URI::new(uri), signer));
+                    return Ok((proof, proof_type, raw_payload, URI::new(uri), raw_owner_did));
                 }
                 _ => return Err(Error::<T>::BadChallengeValue.into()),
             },
@@ -344,10 +367,42 @@ impl<T: Config> Pallet<T> {
         }
     }
 
-    fn account_id_from_did(raw_owner_did: &Vec<u8>) -> Result<Vec<u8>, DispatchError> {
-        let owner_did = String::from_utf8_lossy(raw_owner_did).to_string();
-        let split: Vec<&str> = owner_did.split(':').collect::<Vec<&str>>();
-        let account_id = split.last().ok_or(Error::<T>::AccountMissing)?.clone();
-        Ok(account_id.as_bytes().to_vec())
+    fn account_id_from_source(source: AccountIdSource) -> Result<T::AccountId, DispatchError> {
+        let account_id32 = match source {
+            AccountIdSource::DID(mut raw_owner_did) => {
+                let byte_len = raw_owner_did.len();
+                if byte_len < 48 {
+                    return Err(Error::<T>::BadChallengeValue.into())
+                }
+                let actual_owner_did: Vec<u8> = raw_owner_did.drain(byte_len-48..byte_len).collect();
+                let mut output = bs58::decode(actual_owner_did).into_vec().map_err(|_| Error::<T>::ErrorDecodeBs58)?;
+                let temp: Vec<u8> = output.drain(1..33).collect();
+                let mut raw_account_id = [0u8; 32];
+                let buf = &temp[..raw_account_id.len()];
+                raw_account_id.copy_from_slice(buf);
+                raw_account_id.into()
+            },
+            AccountIdSource::AccountId32(id) => {
+                id
+            }
+        };
+    
+        let account_id = T::AccountId::decode(&mut account_id32.as_ref()).map_err(|_| Error::<T>::ErrorDecodeAccountId)?;
+        Ok(account_id)
+    }
+
+    fn account_id32_from_raw_did(mut raw_owner_did: Vec<u8>) -> Result<AccountId32, DispatchError> {
+        let byte_len = raw_owner_did.len();
+        if byte_len < 48 {
+            return Err(Error::<T>::BadChallengeValue.into())
+        }
+        let actual_owner_did: Vec<u8> = raw_owner_did.drain(byte_len-48..byte_len).collect();
+        let mut output = bs58::decode(actual_owner_did).into_vec().map_err(|_| Error::<T>::ErrorDecodeBs58)?;
+        let temp: Vec<u8> = output.drain(1..33).collect();
+        let mut raw_account_id = [0u8; 32];
+        let buf = &temp[..raw_account_id.len()];
+        raw_account_id.copy_from_slice(buf);
+
+        Ok(raw_account_id.into()) 
     }
 }

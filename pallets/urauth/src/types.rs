@@ -7,7 +7,7 @@ use sp_std::collections::btree_map::BTreeMap;
 
 pub type DIDWeight = u16;
 pub type OwnerDID = Vec<u8>;
-pub type DocId = Vec<u8>;
+pub type DocId = [u8; 16];
 pub type DomainName = Vec<u8>;
 pub type ApprovalCount = u32;
 pub type Threshold = u32;
@@ -80,7 +80,7 @@ impl<T: Config> VerificationSubmission<T> {
         submission: (T::AccountId, H256),
     ) -> Result<VerificationResult, DispatchError> {
         self.update_threshold(member_count);
-        for (acc, h) in self.submission.iter() {
+        for (acc, _) in self.submission.iter() {
             if &submission.0 == acc {
                 return Err(Error::<T>::AlreadySubmitted.into());
             }
@@ -215,6 +215,12 @@ impl<T: Config> Encode for URAuthSignedPayload<T> {
             f(&raw_payload)
         }
     }
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub enum AccountIdSource {
+    DID(Vec<u8>),
+    AccountId32(AccountId32)
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, MaxEncodedLen, TypeInfo)]

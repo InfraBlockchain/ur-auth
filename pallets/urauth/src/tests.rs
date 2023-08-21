@@ -1,10 +1,10 @@
 pub use super::{VerificationResult, VerificationSubmission};
 pub use crate as pallet_urauth;
 use frame_support::{parameter_types, traits::Everything};
-use sp_core::H256;
+use sp_core::{H256, ByteArray};
 use sp_runtime::{
     testing::Header,
-    traits::{BlakeTwo256, IdentityLookup},
+    traits::{BlakeTwo256, IdentityLookup}, AccountId32,
 };
 
 pub type MockBalance = u128;
@@ -106,11 +106,13 @@ fn which_sig(sig: String) -> String {
 #[test]
 fn json_parse_works() {
     use lite_json::{json_parser::parse_json, JsonValue};
+    use sp_std::str::FromStr;
+    use bs58;
 
     let json_string = r#"
         {
             "domain" : "website1.com",
-            "adminDID" : "did:infra:ua:i3jr3...qW3dt",
+            "adminDID" : "did:infra:ua:5DfhGyQdFobKM8NsWvEeAKk5EQQgYe9AydgJ7rMB6E1EqRzV",
             "challenge" : "__random_challenge_value__",
             "timestamp": "2023-07-28T10:17:21Z",
             "proof": {
@@ -144,12 +146,19 @@ fn json_parse_works() {
         }
         _ => {}
     }
-    let did_clone = admin_did.clone();
-    let pk = did_clone.split(':').collect::<Vec<&str>>();
+    let account_id = account_id_from_did_raw(admin_did.clone().as_bytes().to_vec());
+    let mut output = bs58::decode(account_id.clone()).into_vec().unwrap();
+    let cut_address_vec: Vec<u8> = output.drain(1..33).collect();
+    println!("{:?}", cut_address_vec);
+    let mut array = [0u8; 32];
+    let bytes = &cut_address_vec[..array.len()];
+    array.copy_from_slice(bytes);  
+    let account32: AccountId32 = array.into();
+    println!("{:?}", account32.as_slice().to_vec());
     println!("Proof type is => {:?}", which_sig(proof_type.clone()));
     println!(
-        "도메인 => {:?}, 어드민 => {:?}, 퍼블릭키 => {:?}, 챌린지 => {:?}, 타임스탬프 => {:?}, 프루프 타입 => {:?}, 프루프 => {:?}",
-        domain, admin_did, pk.last().unwrap(), challenge, timestamp, proof_type, proof
+        "도메인 => {:?}, 어드민 => {:?}, 퍼블릭키 => {:?}, 어카운트 아이디 32 => {:?}, 챌린지 => {:?}, 타임스탬프 => {:?}, 프루프 타입 => {:?}, 프루프 => {:?}",
+        domain, admin_did, account_id, account32 , challenge, timestamp, proof_type, proof
     );
 }
 
@@ -204,4 +213,17 @@ fn verfiication_submission_update_status_works() {
     let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
     let res = s3.submit(1, (1, h1)).unwrap();
     assert_eq!(res, VerificationResult::Complete);
+}
+
+#[test]
+fn uuid_works() {
+    use nuuid::Uuid;
+    let uuid = Uuid::new_v4();
+    println!("{:?}", uuid);
+}
+
+fn account_id_from_did_raw(mut raw: Vec<u8>) -> Vec<u8> {
+
+    let res: Vec<u8> = raw.drain(raw.len()-48..raw.len()).collect();
+    res
 }
