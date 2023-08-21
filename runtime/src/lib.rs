@@ -530,6 +530,17 @@ impl system_token_aggregator::Config for Runtime {
     type AssetMultiLocationGetter = AssetLink;
 }
 
+parameter_types! {
+    pub const MaxOracleMemembers: u32 = 10;
+}
+
+// impl pallet_urauth::Config for Runtime {
+//     type RuntimeEvent = RuntimeEvent;
+//     type AuthorizedOrigin = EnsureRoot<AccountId>;
+//     type Balance = Balance;
+//     type MaxOracleMemembers = MaxOracleMemembers;
+// }
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
     pub enum Runtime where
@@ -543,6 +554,8 @@ construct_runtime!(
         Timestamp: pallet_timestamp = 2,
         ParachainInfo: parachain_info = 3,
         Sudo: pallet_sudo::{Pallet, Call, Storage, Config<T>, Event<T>} = 4,
+
+        // URAuth: pallet_urauth::{Pallet, Call, Storage, Event<T>} = 5,
 
         // Monetary stuff.
         Balances: pallet_balances = 10,

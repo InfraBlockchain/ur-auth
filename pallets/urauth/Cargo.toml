@@ -1,5 +1,5 @@
 [package]
-name = "urauth"
+name = "pallet-urauth"
 authors = ["blockchain labs"]
 description = "URAuth pallet"
 version = "0.1.0"
@@ -17,9 +17,10 @@ codec = { package = "parity-scale-codec", version = "3.0.0", features = [
 ], default-features = false }
 scale-info = { version = "2.2.0", default-features = false, features = ["derive"] }
 lite-json = { version = "0.2.0", default-features = false }
-safe-regex = "0.2.5"
-nuuid = "0.5.0"
 bs58 = { version = "0.4.0", default-features = false }
+# sp-cid = { version = "0.3.0", default-features = false }
+nuuid = { version = "0.5.0", default-features = false }
+fixedstr = {version = "0.4", default-features = false }
 
 # Substrate
 frame-benchmarking = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, optional = true, branch = "master" }
@@ -28,14 +29,12 @@ frame-system = { git = "https://github.com/InfraBlockchain/infra-substrate", def
 sp-runtime = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 sp-core = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 sp-std = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+sp-io = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 sp-consensus-vrf = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
-pallet-collective = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+
 
 [dev-dependencies]
 serde = { version = "1.0.132" }
-
-# Substrate
-sp-io = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 
 [features]
 default = ["std"]
@@ -45,13 +44,16 @@ std = [
 	"scale-info/std",
     "lite-json/std",
     "bs58/std",
+    # "sp-cid/std",
+    "nuuid/std",
+    "fixedstr/std",
 	"frame-benchmarking/std",
 	"frame-support/std",
 	"frame-system/std",
-    "pallet-collective/std",
     "sp-runtime/std",
     "sp-core/std",
     "sp-std/std",
     "sp-consensus-vrf/std",
+    "sp-io/std",
 ]
 try-runtime = ["frame-support/try-runtime"]

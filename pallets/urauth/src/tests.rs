@@ -1,6 +1,7 @@
 pub use super::{VerificationResult, VerificationSubmission};
 pub use crate as pallet_urauth;
 use frame_support::{parameter_types, traits::Everything};
+use frame_system::EnsureRoot;
 use sp_core::{H256, ByteArray};
 use sp_runtime::{
     testing::Header,
@@ -65,6 +66,7 @@ impl pallet_urauth::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type Balance = MockBalance;
     type MaxOracleMemembers = MaxOracleMemembers;
+    type AuthorizedOrigin = EnsureRoot<MockAccountId>;
 }
 
 pub fn new_test_ext() -> sp_io::TestExternalities {
@@ -76,16 +78,16 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
 
 fn find_json_value(
     json_object: lite_json::JsonObject,
-    field_name: String,
-    sub_field: Option<String>,
-) -> Option<String> {
+    field_name: &str,
+    sub_field: Option<&str>,
+) -> Option<Vec<u8>> {
     let sub = sub_field.map_or("".into(), |s| s);
     let (_, json_value) = json_object
         .iter()
         .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
         .unwrap();
     match json_value {
-        lite_json::JsonValue::String(v) => Some(v.iter().collect::<String>()),
+        lite_json::JsonValue::String(v) => Some(v.iter().map(|c| *c as u8).collect::<Vec<u8>>()),
         lite_json::JsonValue::Object(v) => find_json_value(v.clone(), sub, None),
         _ => None,
     }
@@ -103,12 +105,17 @@ fn which_sig(sig: String) -> String {
     }
 }
 
+fn account_id_from_did_raw(mut raw: Vec<u8>) -> Vec<u8> {
+
+    let res: Vec<u8> = raw.drain(raw.len()-48..raw.len()).collect();
+    res
+}
+
 #[test]
 fn json_parse_works() {
     use lite_json::{json_parser::parse_json, JsonValue};
-    use sp_std::str::FromStr;
     use bs58;
-
+    
     let json_string = r#"
         {
             "domain" : "website1.com",
@@ -124,42 +131,29 @@ fn json_parse_works() {
             }
         } 
 	"#;
+    
     let json_data = parse_json(json_string).expect("Invalid!");
-    let mut domain: String = "".into();
-    let mut admin_did: String = "".into();
-    let mut challenge: String = "".into();
-    let mut timestamp: String = "".into();
-    let mut proof_type: String = "".into();
-    let mut proof: String = "".into();
+    let mut domain: Vec<u8> = vec![];
+    let mut admin_did: Vec<u8> = vec![];
+    let mut challenge: Vec<u8> = vec![];
+    let mut timestamp: Vec<u8> = vec![];
+    let mut proof_type: Vec<u8> = vec![];
+    let mut proof: Vec<u8> = vec![];
 
     match json_data {
         JsonValue::Object(obj_value) => {
-            domain = find_json_value(obj_value.clone(), "domain".into(), None).unwrap();
-            admin_did = find_json_value(obj_value.clone(), "adminDID".into(), None).unwrap();
-            challenge = find_json_value(obj_value.clone(), "challenge".into(), None).unwrap();
-            timestamp = find_json_value(obj_value.clone(), "timestamp".into(), None).unwrap();
-            proof_type = find_json_value(obj_value.clone(), "proof".into(), Some("type".into()))
-                .unwrap()
-                .to_lowercase();
-            proof = find_json_value(obj_value.clone(), "proof".into(), Some("proofValue".into()))
+            domain = find_json_value(obj_value.clone(), "domain", None).unwrap();
+            admin_did = find_json_value(obj_value.clone(), "adminDID", None).unwrap();
+            challenge = find_json_value(obj_value.clone(), "challenge", None).unwrap();
+            timestamp = find_json_value(obj_value.clone(), "timestamp", None).unwrap();
+            proof_type = find_json_value(obj_value.clone(), "proof", Some("type"))
+                .unwrap();
+            proof = find_json_value(obj_value.clone(), "proof".into(), Some("proofValue"))
                 .unwrap();
         }
         _ => {}
     }
-    let account_id = account_id_from_did_raw(admin_did.clone().as_bytes().to_vec());
-    let mut output = bs58::decode(account_id.clone()).into_vec().unwrap();
-    let cut_address_vec: Vec<u8> = output.drain(1..33).collect();
-    println!("{:?}", cut_address_vec);
-    let mut array = [0u8; 32];
-    let bytes = &cut_address_vec[..array.len()];
-    array.copy_from_slice(bytes);  
-    let account32: AccountId32 = array.into();
-    println!("{:?}", account32.as_slice().to_vec());
-    println!("Proof type is => {:?}", which_sig(proof_type.clone()));
-    println!(
-        "도메인 => {:?}, 어드민 => {:?}, 퍼블릭키 => {:?}, 어카운트 아이디 32 => {:?}, 챌린지 => {:?}, 타임스탬프 => {:?}, 프루프 타입 => {:?}, 프루프 => {:?}",
-        domain, admin_did, account_id, account32 , challenge, timestamp, proof_type, proof
-    );
+    assert!(domain == "website1.com".as_bytes().to_vec())
 }
 
 #[test]
@@ -190,7 +184,7 @@ fn verfiication_submission_update_status_works() {
         res,
         Err(sp_runtime::DispatchError::Module(sp_runtime::ModuleError {
             index: 2,
-            error: [8, 0, 0, 0],
+            error: [13, 0, 0, 0],
             message: Some("AlreadySubmitted")
         }))
     );
@@ -218,12 +212,24 @@ fn verfiication_submission_update_status_works() {
 #[test]
 fn uuid_works() {
     use nuuid::Uuid;
-    let uuid = Uuid::new_v4();
+    
+    let uuid = Uuid::from_bytes([0; 16]);
     println!("{:?}", uuid);
 }
 
-fn account_id_from_did_raw(mut raw: Vec<u8>) -> Vec<u8> {
+#[test]
+fn fixed_str_works() {
+    use fixedstr::*;
+    let str1 = zstr::<8>::from("ABCD");
+    let str1_string = str1.to_str();
+    println!("{:?}", str1_string);
+    let str1_to_lower = str1.to_ascii_lower();
+    println!("{:?}", str1_to_lower.to_str());
 
-    let res: Vec<u8> = raw.drain(raw.len()-48..raw.len()).collect();
-    res
+    let proof_type: &str = "Ed25519Signature2020";
+    let raw = proof_type.as_bytes().to_vec();
+    let len = raw.len();
+    println!("{:?}", len);
 }
+
+

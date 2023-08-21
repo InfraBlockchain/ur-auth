@@ -7,7 +7,7 @@ use sp_std::collections::btree_map::BTreeMap;
 
 pub type DIDWeight = u16;
 pub type OwnerDID = Vec<u8>;
-pub type DocId = [u8; 16];
+pub type DocId = Vec<u8>;
 pub type DomainName = Vec<u8>;
 pub type ApprovalCount = u32;
 pub type Threshold = u32;
@@ -126,21 +126,12 @@ impl<T: Config> VerificationSubmission<T> {
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct ChallengeValueConfig {
     pub is_calc_enabled: bool,
-    pub challenge_value_fields: Vec<ChallengeValueField>,
 }
 
 impl Default for ChallengeValueConfig {
     fn default() -> Self {
         Self {
             is_calc_enabled: false,
-            challenge_value_fields: [
-                ChallengeValueField::URI,
-                ChallengeValueField::OwnerDID,
-                ChallengeValueField::Challenge,
-                ChallengeValueField::Timestamp,
-                ChallengeValueField::Proof,
-            ]
-            .to_vec(),
         }
     }
 }
@@ -152,27 +143,6 @@ impl ChallengeValueConfig {
 
     pub fn set_is_calc_enabled(&mut self, enabled: bool) {
         self.is_calc_enabled = enabled;
-    }
-}
-
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
-pub enum ChallengeValueField {
-    URI,
-    OwnerDID,
-    Challenge,
-    Timestamp,
-    Proof,
-}
-
-impl From<ChallengeValueField> for String {
-    fn from(value: ChallengeValueField) -> Self {
-        match value {
-            ChallengeValueField::URI => "domain".into(),
-            ChallengeValueField::OwnerDID => "ownerDID".into(),
-            ChallengeValueField::Challenge => "challenge".into(),
-            ChallengeValueField::Timestamp => "timestamp".into(),
-            ChallengeValueField::Proof => "proof".into(),
-        }
     }
 }
 
@@ -210,7 +180,7 @@ impl<T: Config> Encode for URAuthSignedPayload<T> {
             } => (urauth_doc, owner_did).encode(),
         };
         if raw_payload.len() > 256 {
-            f(&blake2_256(&raw_payload)[..])
+            f(&sp_io::hashing::blake2_256(&raw_payload)[..])
         } else {
             f(&raw_payload)
         }
@@ -224,12 +194,12 @@ pub enum AccountIdSource {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
-pub struct DID<Account> {
+pub struct WeightedDID<Account> {
     pub did: Account,
     pub weight: DIDWeight,
 }
 
-impl<Account> DID<Account> {
+impl<Account> WeightedDID<Account> {
     pub fn new(acc: Account, weight: DIDWeight) -> Self {
         Self {
             did: acc,
@@ -240,7 +210,7 @@ impl<Account> DID<Account> {
 // Multisig-enabled DID
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct MultiDID<Account> {
-    dids: Vec<DID<Account>>,
+    dids: Vec<WeightedDID<Account>>,
     // Sum(weight) >= threshold
     threshold: DIDWeight,
 }
@@ -248,27 +218,37 @@ pub struct MultiDID<Account> {
 impl<Account> MultiDID<Account> {
     pub fn new(acc: Account, weight: DIDWeight) -> Self {
         Self {
-            dids: vec![DID::<Account>::new(acc, weight)],
+            dids: sp_std::vec![WeightedDID::<Account>::new(acc, weight)],
             threshold: weight
         }
     }
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub enum StorageProvider {
+    IPFS
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub struct ContentAddress {
+    storage_provider: StorageProvider,
+    cid: Vec<u8>, // ToDo: CID type
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum ContentMetadata {
-    MetadataV1 { content_address: Vec<u8> },
+    MetadataV1 { content_address: ContentAddress },
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum CopyrightInfo {
     Text(Vec<u8>),
-    CopyrightInfoV1 { copyright_address: Vec<u8> },
+    CopyrightInfoV1 { content_address: ContentAddress },
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct AccessRule<Balance> {
-    path: Vec<u8>, // e.g "/public"
-    rules: Vec<Rule<Balance>>,
+pub enum AccessRule<Balance> {
+    AccessRuleV1 { path: Vec<u8>, rules: Vec<Rule<Balance>> }
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
@@ -298,8 +278,6 @@ pub enum ContentType {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum Proof {
-    // To be defined
-    // Digital Sig
     ProofV1 { proof_value: MultiSignature },
 }
 
@@ -314,7 +292,7 @@ pub struct URAuthDoc<Account, Balance> {
     content_metadata: Option<ContentMetadata>,
     copyright_info: Option<CopyrightInfo>,
     access_rules: Option<Vec<AccessRule<Balance>>>,
-    proofs: Option<Proof>,
+    proofs: Option<Vec<Proof>>,
 }
 
 impl<Account, Balance> URAuthDoc<Account, Balance> {

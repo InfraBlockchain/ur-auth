@@ -1,8 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::{Codec, Encode, MaxEncodedLen};
-use safe_regex::{regex, Matcher0};
 use scale_info::TypeInfo;
+use fixedstr::zstr;
 
 use frame_support::{pallet_prelude::*, BoundedVec};
 
@@ -15,6 +15,7 @@ use sp_runtime::{
     },
     AccountId32, FixedPointOperand, MultiSignature, MultiSigner,
 };
+use sp_std::vec::Vec;
 
 pub use pallet::*;
 
@@ -55,6 +56,8 @@ pub mod pallet {
             + MaxEncodedLen
             + TypeInfo
             + FixedPointOperand;
+
+        type AuthorizedOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
 
     #[pallet::storage]
@@ -125,6 +128,7 @@ pub mod pallet {
         ChallengeValueNotProvided,
         AlreadySubmitted,
         InvalidURI,
+        MaxOracleMembers,
     }
 
     #[pallet::call]
@@ -200,7 +204,7 @@ pub mod pallet {
             match res {
                 VerificationResult::Complete => {
                     let urauth_doc: URAuthDoc<T::AccountId, T::Balance> = URAuthDoc::new(
-                        Self::doc_id(),
+                        uri.clone().inner(),
                         uri.clone(),
                         MultiDID::new(owner, 1)
                     );
@@ -224,15 +228,31 @@ pub mod pallet {
 
             Ok(())
         }
+
+        #[pallet::call_index(3)]
+        #[pallet::weight(1_000)]
+        pub fn add_oracle_member(
+            origin: OriginFor<T>,
+            who: T::AccountId
+        ) -> DispatchResult {
+            T::AuthorizedOrigin::ensure_origin(origin)?;
+
+            OracleMembers::<T>::mutate(|m| {
+                m.try_push(who).map_err(|_| Error::<T>::MaxOracleMembers)
+            })?;
+
+            Ok(())
+        }
     }
 }
 
 impl<T: Config> Pallet<T> {
 
-    fn doc_id() -> [u8; 16] {
-        let uuid = nuuid::Uuid::new_v4();
-        uuid.to_bytes()
-    }
+    // ToDo: Deterministic
+    // fn doc_id() -> [u8; 16] {
+    //     let uuid = nuuid::Uuid::new_v4();
+    //     uuid.to_bytes()
+    // }
 
     // ToDo
     fn challenge_value() -> Randomness {
@@ -265,7 +285,9 @@ impl<T: Config> Pallet<T> {
     }
 
     fn raw_signature_to_multi_sig(proof_type: &Vec<u8>, sig: &Vec<u8>) -> Result<MultiSignature, DispatchError> {
-        let proof_type = String::from_utf8_lossy(proof_type).to_string().to_lowercase();
+        
+        let zstr_proof = zstr::<128>::from_raw(proof_type).to_ascii_lower();
+        let proof_type = zstr_proof.to_str();
         if proof_type.contains("ed25519") {
             let sig =
                 ed25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
@@ -289,10 +311,6 @@ impl<T: Config> Pallet<T> {
     } 
 
     fn is_valid_uri(_uri: &Vec<u8>) -> bool {
-        let _matcher: Matcher0<_> = regex!(br"");
-        // if !matcher.is_match(&[]) {
-        //     return Err(Error::<T>::InvalidURI.into());
-        // }
         true
     }
 
@@ -304,29 +322,29 @@ impl<T: Config> Pallet<T> {
     ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, URI, Vec<u8>), DispatchError> {
         let json_str = sp_std::str::from_utf8(challenge_value)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
-
+        
         match lite_json::parse_json(json_str) {
             Ok(obj) => match obj {
                 // ToDo: Check domain, admin_did, challenge
                 lite_json::JsonValue::Object(obj) => {
-                    let uri = Self::find_json_value(&obj, String::from("domain"), None)?
+                    let uri = Self::find_json_value(&obj, "domain", None)?
                         .ok_or(Error::<T>::BadChallengeValue)?;
-                    let owner_did = Self::find_json_value(&obj, String::from("adminDID"), None)?
+                    let owner_did = Self::find_json_value(&obj, "adminDID", None)?
                         .ok_or(Error::<T>::BadChallengeValue)?;
-                    let challenge = Self::find_json_value(&obj, String::from("challenge"), None)?
+                    let challenge = Self::find_json_value(&obj, "challenge", None)?
                         .ok_or(Error::<T>::BadChallengeValue)?;
-                    let timestamp = Self::find_json_value(&obj, String::from("timestamp"), None)?
+                    let timestamp = Self::find_json_value(&obj, "timestamp", None)?
                         .ok_or(Error::<T>::BadChallengeValue)?;
                     let proof_type = Self::find_json_value(
                         &obj,
-                        String::from("proof"),
-                        Some(String::from("type")),
+                        "proof",
+                        Some("type"),
                     )?
                     .ok_or(Error::<T>::BadChallengeValue)?;
                     let proof = Self::find_json_value(
                         &obj,
-                        String::from("proof"),
-                        Some(String::from("proofValue")),
+                        "proof",
+                        Some("proofValue"),
                     )?
                     .ok_or(Error::<T>::BadChallengeValue)?;
 
@@ -350,17 +368,17 @@ impl<T: Config> Pallet<T> {
 
     fn find_json_value(
         json_object: &lite_json::JsonObject,
-        field_name: String,
-        sub_field: Option<String>,
+        field_name: &str,
+        sub_field: Option<&str>,
     ) -> Result<Option<Vec<u8>>, DispatchError> {
-        let sub = sub_field.map_or("".into(), |s| s);
+        let sub = sub_field.map_or("", |s| s);
         let (_, json_value) = json_object
             .iter()
             .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
             .ok_or(Error::<T>::BadChallengeValue)?;
         match json_value {
             lite_json::JsonValue::String(v) => {
-                Ok(Some(v.iter().collect::<String>().as_bytes().to_vec()))
+                Ok(Some(v.iter().map(|c| *c as u8).collect::<Vec<u8>>()))
             }
             lite_json::JsonValue::Object(v) => Self::find_json_value(v, sub, None),
             _ => Ok(None),
