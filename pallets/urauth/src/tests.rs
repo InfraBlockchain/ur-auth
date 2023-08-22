@@ -1,13 +1,14 @@
 pub use super::*;
 pub use crate::{self as pallet_urauth, Event as URAuthEvent, *};
-use frame_support::{parameter_types, traits::Everything, assert_ok, assert_noop};
+use frame_support::{assert_noop, assert_ok, parameter_types, traits::Everything};
 use frame_system::EnsureRoot;
 use sp_core::H256;
-use sp_runtime::{
-    testing::Header, MultiSignature, MultiSigner,
-    traits::{BlakeTwo256, IdentityLookup}, AccountId32,
-};
 use sp_keyring::AccountKeyring::*;
+use sp_runtime::{
+    testing::Header,
+    traits::{BlakeTwo256, IdentityLookup},
+    AccountId32, MultiSignature, MultiSigner,
+};
 
 pub type MockBalance = u128;
 pub type MockAccountId = AccountId32;
@@ -81,7 +82,7 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
         .unwrap();
     let mut ext: sp_io::TestExternalities = storage.into();
     ext.execute_with(|| System::set_block_number(1)); // For 'Event'
-	ext
+    ext
 }
 
 fn find_json_value(
@@ -102,8 +103,7 @@ fn find_json_value(
 }
 
 fn account_id_from_did_raw(mut raw: Vec<u8>) -> AccountId32 {
-
-    let actual_owner_did: Vec<u8> = raw.drain(raw.len()-48..raw.len()).collect();
+    let actual_owner_did: Vec<u8> = raw.drain(raw.len() - 48..raw.len()).collect();
     let mut output = bs58::decode(actual_owner_did).into_vec().unwrap();
     let temp: Vec<u8> = output.drain(1..33).collect();
     let mut raw_account_id = [0u8; 32];
@@ -115,7 +115,7 @@ fn account_id_from_did_raw(mut raw: Vec<u8>) -> AccountId32 {
 #[test]
 fn json_parse_works() {
     use lite_json::{json_parser::parse_json, JsonValue};
-    
+
     let json_string = r#"
         {
             "domain" : "website1.com",
@@ -131,7 +131,7 @@ fn json_parse_works() {
             }
         } 
 	"#;
-    
+
     let json_data = parse_json(json_string).expect("Invalid!");
     let mut domain: Vec<u8> = vec![];
     let mut admin_did: Vec<u8> = vec![];
@@ -146,15 +146,18 @@ fn json_parse_works() {
             admin_did = find_json_value(obj_value.clone(), "adminDID", None).unwrap();
             challenge = find_json_value(obj_value.clone(), "challenge", None).unwrap();
             timestamp = find_json_value(obj_value.clone(), "timestamp", None).unwrap();
-            proof_type = find_json_value(obj_value.clone(), "proof", Some("type"))
-                .unwrap();
-            proof = find_json_value(obj_value.clone(), "proof".into(), Some("proofValue"))
-                .unwrap();
+            proof_type = find_json_value(obj_value.clone(), "proof", Some("type")).unwrap();
+            proof = find_json_value(obj_value.clone(), "proof".into(), Some("proofValue")).unwrap();
         }
         _ => {}
     }
     assert!(domain == "website1.com".as_bytes().to_vec());
-    assert!(admin_did == "did:infra:ua:5DfhGyQdFobKM8NsWvEeAKk5EQQgYe9AydgJ7rMB6E1EqRzV".as_bytes().to_vec());
+    assert!(
+        admin_did
+            == "did:infra:ua:5DfhGyQdFobKM8NsWvEeAKk5EQQgYe9AydgJ7rMB6E1EqRzV"
+                .as_bytes()
+                .to_vec()
+    );
     assert!(challenge == "__random_challenge_value__".as_bytes().to_vec());
     assert!(timestamp == "2023-07-28T10:17:21Z".as_bytes().to_vec());
     assert!(proof_type == "Ed25519Signature2020".as_bytes().to_vec());
@@ -180,7 +183,6 @@ fn verification_submission_dynamic_threshold_works() {
 
 #[test]
 fn verfiication_submission_update_status_works() {
-
     // Complete
     let mut s1: VerificationSubmission<Test> = Default::default();
     let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
@@ -217,7 +219,7 @@ fn verfiication_submission_update_status_works() {
 
 pub enum SigType {
     URI(String, String),
-    Challenge(URI, String, String, String)
+    Challenge(URI, String, String, String),
 }
 
 fn create_signature(keyring: sp_keyring::AccountKeyring, sig_type: SigType) -> MultiSignature {
@@ -227,7 +229,7 @@ fn create_signature(keyring: sp_keyring::AccountKeyring, sig_type: SigType) -> M
             let raw_did = did.as_bytes().to_vec();
 
             (raw_uri, raw_did).encode()
-        },
+        }
         SigType::Challenge(uri, owner_did, challenge, timestamp) => {
             let raw_did = owner_did.as_bytes().to_vec();
             let raw_challenge = challenge.as_bytes().to_vec();
@@ -242,19 +244,22 @@ fn create_signature(keyring: sp_keyring::AccountKeyring, sig_type: SigType) -> M
 }
 
 fn generate_did(account_id: &str) -> String {
-    format!(
-        "{}{}",
-        "did:infra:ua:", account_id
-    )
+    format!("{}{}", "did:infra:ua:", account_id)
 }
 
 #[test]
 fn sig_works() {
-    
-    let sig = create_signature(Alice, SigType::URI("www.website1.com".into(), generate_did(ALICE_SS58)));
-    let msg = ("www.website1.com".as_bytes().to_vec(), generate_did(ALICE_SS58)).encode();
+    let sig = create_signature(
+        Alice,
+        SigType::URI("www.website1.com".into(), generate_did(ALICE_SS58)),
+    );
+    let msg = (
+        "www.website1.com".as_bytes().to_vec(),
+        generate_did(ALICE_SS58),
+    )
+        .encode();
     let _ = create_signature(
-        Alice, 
+        Alice,
         SigType::Challenge(
             URI::new("www.website1.com".as_bytes().to_vec()), 
             "did:infra:ua:5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY".into(), 
@@ -272,69 +277,69 @@ fn urauth_request_register_domain_owner_works() {
     let challenge_value = Some(Randomness::default());
     println!("{:?}", challenge_value);
     let signer = MultiSigner::Sr25519(Alice.public());
-    let signature = create_signature(Alice, SigType::URI("www.website1.com".into(), generate_did(ALICE_SS58)));
+    let signature = create_signature(
+        Alice,
+        SigType::URI("www.website1.com".into(), generate_did(ALICE_SS58)),
+    );
     new_test_ext().execute_with(|| {
-        assert_ok!(
-            URAuth::urauth_request_register_domain_owner(
-                RuntimeOrigin::signed(
-                    Alice.to_account_id()
-                ), 
-                uri.clone(), 
-                owner_did.as_bytes().to_vec(), 
-                challenge_value, 
-                signer.clone(), 
-                signature.clone()
-            )
-        );
+        assert_ok!(URAuth::urauth_request_register_domain_owner(
+            RuntimeOrigin::signed(Alice.to_account_id()),
+            uri.clone(),
+            owner_did.as_bytes().to_vec(),
+            challenge_value,
+            signer.clone(),
+            signature.clone()
+        ));
 
         let metadata = URIMetadata::<Test>::get(&uri).unwrap();
         assert_eq!(
             String::from_utf8_lossy(&metadata.owner_did),
             generate_did(ALICE_SS58)
         );
-        assert_eq!(
-            metadata.challenge_value,
-            Randomness::default()
-        );
+        assert_eq!(metadata.challenge_value, Randomness::default());
         println!("{:?}", String::from_utf8_lossy(&metadata.owner_did));
-        System::assert_has_event(
-            URAuthEvent::URAuthRegisterRequested { uri: uri.clone() }.into()
-        );
+        System::assert_has_event(URAuthEvent::URAuthRegisterRequested { uri: uri.clone() }.into());
 
         assert_noop!(
             URAuth::urauth_request_register_domain_owner(
                 RuntimeOrigin::signed(Alice.to_account_id()),
-                uri.clone(), 
-                generate_did(BOB_SS58).as_bytes().to_vec(), 
-                challenge_value.clone(), 
-                signer.clone(), 
+                uri.clone(),
+                generate_did(BOB_SS58).as_bytes().to_vec(),
+                challenge_value.clone(),
+                signer.clone(),
                 signature.clone()
             ),
             Error::<Test>::BadSigner
         );
 
-        let signature2 = create_signature(Alice, SigType::URI("www.website.com".into(), generate_did(ALICE_SS58)));
+        let signature2 = create_signature(
+            Alice,
+            SigType::URI("www.website.com".into(), generate_did(ALICE_SS58)),
+        );
 
         assert_noop!(
             URAuth::urauth_request_register_domain_owner(
                 RuntimeOrigin::signed(Alice.to_account_id()),
-                uri.clone(), 
-                owner_did.as_bytes().to_vec(), 
-                challenge_value.clone(), 
-                signer.clone(), 
+                uri.clone(),
+                owner_did.as_bytes().to_vec(),
+                challenge_value.clone(),
+                signer.clone(),
                 signature2
             ),
             Error::<Test>::BadProof
         );
 
-        let signature3 = create_signature(Alice, SigType::URI("www.website1.com".into(), generate_did(BOB_SS58)));
+        let signature3 = create_signature(
+            Alice,
+            SigType::URI("www.website1.com".into(), generate_did(BOB_SS58)),
+        );
         assert_noop!(
             URAuth::urauth_request_register_domain_owner(
                 RuntimeOrigin::signed(Alice.to_account_id()),
-                uri.clone(), 
-                owner_did.as_bytes().to_vec(), 
-                challenge_value.clone(), 
-                signer.clone(), 
+                uri.clone(),
+                owner_did.as_bytes().to_vec(),
+                challenge_value.clone(),
+                signer.clone(),
                 signature3
             ),
             Error::<Test>::BadProof
@@ -348,79 +353,108 @@ fn verify_challenge_works() {
     let owner_did = generate_did(ALICE_SS58);
     let challenge_value = "[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]";
     let timestamp = "2023-07-28T10:17:21Z";
-    let msg = (uri.clone(), owner_did.as_bytes().to_vec(), challenge_value.as_bytes().to_vec(), timestamp.as_bytes().to_vec()).encode();
+    let msg = (
+        uri.clone(),
+        owner_did.as_bytes().to_vec(),
+        challenge_value.as_bytes().to_vec(),
+        timestamp.as_bytes().to_vec(),
+    )
+        .encode();
     let sig = Alice.sign(&msg);
-    let request_signature = create_signature(Alice, SigType::URI("www.website1.com".into(), generate_did(ALICE_SS58)));
+    let request_signature = create_signature(
+        Alice,
+        SigType::URI("www.website1.com".into(), generate_did(ALICE_SS58)),
+    );
 
     let json_str = generate_json(
-        "www.website1.com".into(), 
+        "www.website1.com".into(),
         owner_did.clone(),
         challenge_value.into(),
         timestamp.into(),
         "Sr25519Signature2020".into(),
-        hex::encode(sig).clone()
+        hex::encode(sig).clone(),
     );
-    
+
     new_test_ext().execute_with(|| {
-        assert_ok!(
-            URAuth::add_oracle_member(RuntimeOrigin::root(), Alice.to_account_id())
-        );
+        assert_ok!(URAuth::add_oracle_member(
+            RuntimeOrigin::root(),
+            Alice.to_account_id()
+        ));
 
-        assert_ok!(
-            URAuth::urauth_request_register_domain_owner(
-                RuntimeOrigin::signed(
-                    Alice.to_account_id()
-                ), 
-                uri.clone(), 
-                owner_did.as_bytes().to_vec(), 
-                Some(Randomness::default()), 
-                MultiSigner::Sr25519(Alice.public()), 
-                request_signature
-            )
-        );
+        assert_ok!(URAuth::urauth_request_register_domain_owner(
+            RuntimeOrigin::signed(Alice.to_account_id()),
+            uri.clone(),
+            owner_did.as_bytes().to_vec(),
+            Some(Randomness::default()),
+            MultiSigner::Sr25519(Alice.public()),
+            request_signature
+        ));
 
-        assert_ok!(
-            URAuth::verify_challenge(
-                RuntimeOrigin::signed(Alice.to_account_id()),
-                json_str.as_bytes().to_vec()
-            )
-        );
+        assert_ok!(URAuth::verify_challenge(
+            RuntimeOrigin::signed(Alice.to_account_id()),
+            json_str.as_bytes().to_vec()
+        ));
 
         System::assert_has_event(
             URAuthEvent::<Test>::VerificationInfo {
                 uri: uri.clone(),
-                progress_status: VerificationResult::Complete
-            }.into()
+                progress_status: VerificationResult::Complete,
+            }
+            .into(),
         );
         let urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
         println!("{:?}", urauth_doc);
     });
 }
 
-fn generate_json(domain: String, owner_did: String, challenge_value: String, timestamp: String, proof_type: String, proof: String) -> String {
-
+fn generate_json(
+    domain: String,
+    owner_did: String,
+    challenge_value: String,
+    timestamp: String,
+    proof_type: String,
+    proof: String,
+) -> String {
     use lite_json::Serialize;
 
-    let mut object_elements = vec!();
+    let mut object_elements = vec![];
 
     let object_key = "domain".chars().collect();
-    object_elements.push((object_key, lite_json::JsonValue::String(domain.chars().collect())));
+    object_elements.push((
+        object_key,
+        lite_json::JsonValue::String(domain.chars().collect()),
+    ));
 
     let object_key = "adminDID".chars().collect();
-    object_elements.push((object_key, lite_json::JsonValue::String(owner_did.chars().collect())));
+    object_elements.push((
+        object_key,
+        lite_json::JsonValue::String(owner_did.chars().collect()),
+    ));
 
     let object_key = "challenge".chars().collect();
-    object_elements.push((object_key, lite_json::JsonValue::String(challenge_value.chars().collect())));
+    object_elements.push((
+        object_key,
+        lite_json::JsonValue::String(challenge_value.chars().collect()),
+    ));
 
     let object_key = "timestamp".chars().collect();
-    object_elements.push((object_key, lite_json::JsonValue::String(timestamp.chars().collect())));
+    object_elements.push((
+        object_key,
+        lite_json::JsonValue::String(timestamp.chars().collect()),
+    ));
 
     let mut proof_object = vec![];
     let object_key = "type".chars().collect();
-    proof_object.push((object_key, lite_json::JsonValue::String(proof_type.chars().collect())));
-    
+    proof_object.push((
+        object_key,
+        lite_json::JsonValue::String(proof_type.chars().collect()),
+    ));
+
     let object_key = "proofValue".chars().collect();
-    proof_object.push((object_key, lite_json::JsonValue::String(proof.chars().collect())));
+    proof_object.push((
+        object_key,
+        lite_json::JsonValue::String(proof.chars().collect()),
+    ));
 
     let object_key = "proof".chars().collect();
     object_elements.push((object_key, lite_json::JsonValue::Object(proof_object)));
@@ -428,16 +462,16 @@ fn generate_json(domain: String, owner_did: String, challenge_value: String, tim
     let object_value = lite_json::JsonValue::Object(object_elements);
 
     // Convert the object to a JSON string.
-	let json = object_value.format(4);
-	let json_output = std::str::from_utf8(&json).unwrap();
+    let json = object_value.format(4);
+    let json_output = std::str::from_utf8(&json).unwrap();
 
-	json_output.to_string()
+    json_output.to_string()
 }
 
 #[test]
 fn uuid_works() {
     use nuuid::Uuid;
-    
+
     let uuid = Uuid::from_bytes([0; 16]);
     println!("{:?}", uuid);
 }
@@ -456,6 +490,3 @@ fn fixed_str_works() {
     let len = raw.len();
     println!("{:?}", len);
 }
-
-
-

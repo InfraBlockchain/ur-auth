@@ -1,8 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::{Codec, Encode, MaxEncodedLen};
-use scale_info::TypeInfo;
 use fixedstr::zstr;
+use scale_info::TypeInfo;
 
 use frame_support::{pallet_prelude::*, BoundedVec};
 
@@ -11,7 +11,7 @@ use sp_consensus_vrf::schnorrkel::Randomness;
 use sp_core::*;
 use sp_runtime::{
     traits::{
-        AtLeast32BitUnsigned, BlakeTwo256, IdentifyAccount, MaybeSerializeDeserialize, Verify, 
+        AtLeast32BitUnsigned, BlakeTwo256, IdentifyAccount, MaybeSerializeDeserialize, Verify,
     },
     AccountId32, FixedPointOperand, MultiSignature, MultiSigner,
 };
@@ -111,8 +111,8 @@ pub mod pallet {
             progress_status: VerificationResult,
         },
         URIRemoved {
-            uri: URI
-        }
+            uri: URI,
+        },
     }
 
     #[pallet::error]
@@ -156,7 +156,9 @@ pub mod pallet {
             };
 
             // Check whether account id of owner did and signer are same
-            let signer_account_id = Self::account_id_from_source(AccountIdSource::AccountId32(signer.clone().into_account()))?;
+            let signer_account_id = Self::account_id_from_source(AccountIdSource::AccountId32(
+                signer.clone().into_account(),
+            ))?;
             Self::check_is_valid_owner(&owner_did, &signer_account_id)?;
 
             // Check signature
@@ -184,7 +186,6 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         /// ToDo: URI Verification Period
         pub fn verify_challenge(origin: OriginFor<T>, challenge_value: Vec<u8>) -> DispatchResult {
-
             let who = ensure_signed(origin)?;
             ensure!(
                 Self::oracle_members().contains(&who),
@@ -197,7 +198,13 @@ pub mod pallet {
 
             // 1. OwnerDID of URI == Challenge Value's DID
             // 2. Verify signature
-            let owner = Self::try_verify_challenge_value(sig, proof_type, raw_payload, &uri, &raw_owner_did)?;
+            let owner = Self::try_verify_challenge_value(
+                sig,
+                proof_type,
+                raw_payload,
+                &uri,
+                &raw_owner_did,
+            )?;
             let member_count = Self::oracle_members().len();
             let mut vs = if let Some(vs) = URIVerificationInfo::<T>::get(&uri) {
                 vs
@@ -209,40 +216,30 @@ pub mod pallet {
                 VerificationResult::Complete => {
                     let mut count = Counter::<T>::get();
                     count = count.checked_add(1).ok_or(Error::<T>::Overflow)?;
-                    let urauth_doc: URAuthDoc<T::AccountId, T::Balance> = URAuthDoc::new(
-                        Self::doc_id(count),
-                        uri.clone(),
-                        MultiDID::new(owner, 1)
-                    );
+                    let urauth_doc: URAuthDoc<T::AccountId, T::Balance> =
+                        URAuthDoc::new(Self::doc_id(count), uri.clone(), MultiDID::new(owner, 1));
                     Counter::<T>::put(count);
                     URAuthTree::<T>::insert(&uri, urauth_doc.clone());
-                    Self::deposit_event(
-                        Event::<T>::URAuthTreeRegistered {
-                            count,
-                            uri: uri.clone(),
-                            urauth_doc
-                        }
-                    )
-                },
-                VerificationResult::Tie => { Self::remove_all_uri_related(uri.clone()) },
+                    Self::deposit_event(Event::<T>::URAuthTreeRegistered {
+                        count,
+                        uri: uri.clone(),
+                        urauth_doc,
+                    })
+                }
+                VerificationResult::Tie => Self::remove_all_uri_related(uri.clone()),
                 _ => { /* In progress */ }
             }
-            Self::deposit_event(
-                Event::<T>::VerificationInfo {
-                    uri,
-                    progress_status: res
-                }
-            );
+            Self::deposit_event(Event::<T>::VerificationInfo {
+                uri,
+                progress_status: res,
+            });
 
             Ok(())
         }
 
         #[pallet::call_index(3)]
         #[pallet::weight(1_000)]
-        pub fn add_oracle_member(
-            origin: OriginFor<T>,
-            who: T::AccountId
-        ) -> DispatchResult {
+        pub fn add_oracle_member(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
             T::AuthorizedOrigin::ensure_origin(origin)?;
 
             OracleMembers::<T>::mutate(|m| {
@@ -255,7 +252,6 @@ pub mod pallet {
 }
 
 impl<T: Config> Pallet<T> {
-
     fn doc_id(index: u128) -> [u8; 16] {
         let b = index.to_le_bytes();
         nuuid::Uuid::from_bytes(b).to_bytes()
@@ -268,7 +264,7 @@ impl<T: Config> Pallet<T> {
 
     fn try_verify_challenge_value(
         sig: Vec<u8>,
-        proof_type: Vec<u8>, 
+        proof_type: Vec<u8>,
         raw_payload: Vec<u8>,
         uri: &URI,
         raw_owner_did: &Vec<u8>,
@@ -285,25 +281,33 @@ impl<T: Config> Pallet<T> {
         Ok(signer)
     }
 
-    fn check_is_valid_owner(raw_owner_did: &Vec<u8>, signer: &T::AccountId) -> Result<(), DispatchError> {
-        let owner_account_id = Self::account_id_from_source(AccountIdSource::DID(raw_owner_did.clone()))?;
+    fn check_is_valid_owner(
+        raw_owner_did: &Vec<u8>,
+        signer: &T::AccountId,
+    ) -> Result<(), DispatchError> {
+        let owner_account_id =
+            Self::account_id_from_source(AccountIdSource::DID(raw_owner_did.clone()))?;
         ensure!(&owner_account_id == signer, Error::<T>::BadSigner);
         Ok(())
     }
 
-    fn raw_signature_to_multi_sig(proof_type: &Vec<u8>, sig: &Vec<u8>) -> Result<MultiSignature, DispatchError> {
+    fn raw_signature_to_multi_sig(
+        proof_type: &Vec<u8>,
+        sig: &Vec<u8>,
+    ) -> Result<MultiSignature, DispatchError> {
         let zstr_proof = zstr::<128>::from_raw(proof_type).to_ascii_lower();
         let proof_type = zstr_proof.to_str();
         if proof_type.contains("ed25519") {
-            let sig =
-                ed25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
+            let sig = ed25519::Signature::try_from(&sig[..])
+                .map_err(|_| Error::<T>::ErrorConvertToSignature)?;
             Ok(sig.into())
         } else if proof_type.contains("sr25519") {
-            let sig =
-                sr25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
+            let sig = sr25519::Signature::try_from(&sig[..])
+                .map_err(|_| Error::<T>::ErrorConvertToSignature)?;
             Ok(sig.into())
         } else {
-            let sig = ecdsa::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
+            let sig = ecdsa::Signature::try_from(&sig[..])
+                .map_err(|_| Error::<T>::ErrorConvertToSignature)?;
             Ok(sig.into())
         }
     }
@@ -314,7 +318,7 @@ impl<T: Config> Pallet<T> {
         ChallengeValue::<T>::remove(&uri);
 
         Self::deposit_event(Event::<T>::URIRemoved { uri })
-    } 
+    }
 
     /// Return
     ///
@@ -324,7 +328,7 @@ impl<T: Config> Pallet<T> {
     ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, URI, Vec<u8>), DispatchError> {
         let json_str = sp_std::str::from_utf8(challenge_value)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
-        
+
         match lite_json::parse_json(json_str) {
             Ok(obj) => match obj {
                 // ToDo: Check domain, admin_did, challenge
@@ -337,18 +341,10 @@ impl<T: Config> Pallet<T> {
                         .ok_or(Error::<T>::BadChallengeValue)?;
                     let timestamp = Self::find_json_value(&obj, "timestamp", None)?
                         .ok_or(Error::<T>::BadChallengeValue)?;
-                    let proof_type = Self::find_json_value(
-                        &obj,
-                        "proof",
-                        Some("type"),
-                    )?
-                    .ok_or(Error::<T>::BadChallengeValue)?;
-                    let hex_proof = Self::find_json_value(
-                        &obj,
-                        "proof",
-                        Some("proofValue"),
-                    )?
-                    .ok_or(Error::<T>::BadChallengeValue)?;
+                    let proof_type = Self::find_json_value(&obj, "proof", Some("type"))?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let hex_proof = Self::find_json_value(&obj, "proof", Some("proofValue"))?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
                     let proof = hex::decode(hex_proof).map_err(|_| Error::<T>::ErrorDecodeHex)?;
                     let mut raw_payload: Vec<u8> = Default::default();
                     let raw_owner_did = owner_did.clone();
@@ -392,37 +388,41 @@ impl<T: Config> Pallet<T> {
             AccountIdSource::DID(mut raw_owner_did) => {
                 let byte_len = raw_owner_did.len();
                 if byte_len < 48 {
-                    return Err(Error::<T>::BadChallengeValue.into())
+                    return Err(Error::<T>::BadChallengeValue.into());
                 }
-                let actual_owner_did: Vec<u8> = raw_owner_did.drain(byte_len-48..byte_len).collect();
-                let mut output = bs58::decode(actual_owner_did).into_vec().map_err(|_| Error::<T>::ErrorDecodeBs58)?;
+                let actual_owner_did: Vec<u8> =
+                    raw_owner_did.drain(byte_len - 48..byte_len).collect();
+                let mut output = bs58::decode(actual_owner_did)
+                    .into_vec()
+                    .map_err(|_| Error::<T>::ErrorDecodeBs58)?;
                 let temp: Vec<u8> = output.drain(1..33).collect();
                 let mut raw_account_id = [0u8; 32];
                 let buf = &temp[..raw_account_id.len()];
                 raw_account_id.copy_from_slice(buf);
                 raw_account_id.into()
-            },
-            AccountIdSource::AccountId32(id) => {
-                id
             }
+            AccountIdSource::AccountId32(id) => id,
         };
-    
-        let account_id = T::AccountId::decode(&mut account_id32.as_ref()).map_err(|_| Error::<T>::ErrorDecodeAccountId)?;
+
+        let account_id = T::AccountId::decode(&mut account_id32.as_ref())
+            .map_err(|_| Error::<T>::ErrorDecodeAccountId)?;
         Ok(account_id)
     }
 
     fn account_id32_from_raw_did(mut raw_owner_did: Vec<u8>) -> Result<AccountId32, DispatchError> {
         let byte_len = raw_owner_did.len();
         if byte_len < 48 {
-            return Err(Error::<T>::BadChallengeValue.into())
+            return Err(Error::<T>::BadChallengeValue.into());
         }
-        let actual_owner_did: Vec<u8> = raw_owner_did.drain(byte_len-48..byte_len).collect();
-        let mut output = bs58::decode(actual_owner_did).into_vec().map_err(|_| Error::<T>::ErrorDecodeBs58)?;
+        let actual_owner_did: Vec<u8> = raw_owner_did.drain(byte_len - 48..byte_len).collect();
+        let mut output = bs58::decode(actual_owner_did)
+            .into_vec()
+            .map_err(|_| Error::<T>::ErrorDecodeBs58)?;
         let temp: Vec<u8> = output.drain(1..33).collect();
         let mut raw_account_id = [0u8; 32];
         let buf = &temp[..raw_account_id.len()];
         raw_account_id.copy_from_slice(buf);
 
-        Ok(raw_account_id.into()) 
+        Ok(raw_account_id.into())
     }
 }

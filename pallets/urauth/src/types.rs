@@ -72,7 +72,6 @@ pub enum VerificationResult {
 }
 
 impl<T: Config> VerificationSubmission<T> {
-
     pub fn submit(
         &mut self,
         member_count: usize,
@@ -189,7 +188,7 @@ impl<T: Config> Encode for URAuthSignedPayload<T> {
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum AccountIdSource {
     DID(Vec<u8>),
-    AccountId32(AccountId32)
+    AccountId32(AccountId32),
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
@@ -200,10 +199,7 @@ pub struct WeightedDID<Account> {
 
 impl<Account> WeightedDID<Account> {
     pub fn new(acc: Account, weight: DIDWeight) -> Self {
-        Self {
-            did: acc,
-            weight
-        }
+        Self { did: acc, weight }
     }
 }
 // Multisig-enabled DID
@@ -218,20 +214,20 @@ impl<Account> MultiDID<Account> {
     pub fn new(acc: Account, weight: DIDWeight) -> Self {
         Self {
             dids: sp_std::vec![WeightedDID::<Account>::new(acc, weight)],
-            threshold: weight
+            threshold: weight,
         }
     }
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum StorageProvider {
-    IPFS
+    IPFS,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct ContentAddress {
     storage_provider: StorageProvider,
-    cid: Vec<u8>, 
+    cid: Vec<u8>,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
@@ -247,7 +243,10 @@ pub enum CopyrightInfo {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum AccessRule<Balance> {
-    AccessRuleV1 { path: Vec<u8>, rules: Vec<Rule<Balance>> }
+    AccessRuleV1 {
+        path: Vec<u8>,
+        rules: Vec<Rule<Balance>>,
+    },
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
