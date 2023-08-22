@@ -18,9 +18,9 @@ codec = { package = "parity-scale-codec", version = "3.0.0", features = [
 scale-info = { version = "2.2.0", default-features = false, features = ["derive"] }
 lite-json = { version = "0.2.0", default-features = false }
 bs58 = { version = "0.4.0", default-features = false }
-# sp-cid = { version = "0.3.0", default-features = false }
 nuuid = { version = "0.5.0", default-features = false }
 fixedstr = {version = "0.4", default-features = false }
+hex = { version = "0.4", default-features = false }
 
 # Substrate
 frame-benchmarking = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, optional = true, branch = "master" }
@@ -34,6 +34,7 @@ sp-consensus-vrf = { git = "https://github.com/InfraBlockchain/infra-substrate",
 
 
 [dev-dependencies]
+sp-keyring = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 serde = { version = "1.0.132" }
 
 [features]
@@ -44,9 +45,9 @@ std = [
 	"scale-info/std",
     "lite-json/std",
     "bs58/std",
-    # "sp-cid/std",
     "nuuid/std",
     "fixedstr/std",
+    "hex/std",
 	"frame-benchmarking/std",
 	"frame-support/std",
 	"frame-system/std",

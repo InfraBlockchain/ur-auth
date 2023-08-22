@@ -122,12 +122,12 @@ pub mod pallet {
         ErrorConvertToSignature,
         ErrorDecodeBs58,
         ErrorDecodeAccountId,
+        ErrorDecodeHex,
         NotOracleMember,
         URINotVerfied,
         AccountMissing,
         ChallengeValueNotProvided,
         AlreadySubmitted,
-        InvalidURI,
         MaxOracleMembers,
     }
 
@@ -144,7 +144,6 @@ pub mod pallet {
             signature: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            ensure!(Self::is_valid_uri(&uri.inner()), Error::<T>::InvalidURI);
 
             let urauth_signed_payload = URAuthSignedPayload::<T>::Request {
                 uri: uri.clone(),
@@ -169,7 +168,7 @@ pub mod pallet {
             };
 
             ChallengeValue::<T>::insert(&uri, cv);
-            URIMetadata::<T>::insert(&uri, Metadata::new(uri.inner(), owner_did.clone(), cv));
+            URIMetadata::<T>::insert(&uri, Metadata::new(owner_did, cv));
 
             Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri });
 
@@ -248,9 +247,8 @@ pub mod pallet {
 
 impl<T: Config> Pallet<T> {
 
-    // ToDo: Deterministic
-    // fn doc_id() -> [u8; 16] {
-    //     let uuid = nuuid::Uuid::new_v4();
+    // fn doc_id(index: ) -> [u8; 16] {
+    //     let uuid = nuuid::Uuid::from_bytes();
     //     uuid.to_bytes()
     // }
 
@@ -267,6 +265,7 @@ impl<T: Config> Pallet<T> {
         raw_owner_did: &Vec<u8>,
     ) -> Result<T::AccountId, DispatchError> {
         let multi_sig = Self::raw_signature_to_multi_sig(&proof_type, &sig)?;
+        sp_std::if_std! { println!("Multi Sig Runtime => {:?}", multi_sig) }
         let signer = Self::account_id32_from_raw_did(raw_owner_did.clone())?;
         if !raw_payload.using_encoded(|m| multi_sig.verify(m, &signer)) {
             return Err(Error::<T>::BadProof.into());
@@ -285,7 +284,6 @@ impl<T: Config> Pallet<T> {
     }
 
     fn raw_signature_to_multi_sig(proof_type: &Vec<u8>, sig: &Vec<u8>) -> Result<MultiSignature, DispatchError> {
-        
         let zstr_proof = zstr::<128>::from_raw(proof_type).to_ascii_lower();
         let proof_type = zstr_proof.to_str();
         if proof_type.contains("ed25519") {
@@ -295,7 +293,10 @@ impl<T: Config> Pallet<T> {
         } else if proof_type.contains("sr25519") {
             let sig =
                 sr25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
-            Ok(MultiSignature::Sr25519(sig))
+            sp_std::if_std! { 
+                println!(" Signature Byte Runtime => {:?}", sig.0); 
+            }
+            Ok(sig.into())
         } else {
             let sig = ecdsa::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
             Ok(MultiSignature::Ecdsa(sig))
@@ -309,10 +310,6 @@ impl<T: Config> Pallet<T> {
 
         Self::deposit_event(Event::<T>::URIRemoved { uri })
     } 
-
-    fn is_valid_uri(_uri: &Vec<u8>) -> bool {
-        true
-    }
 
     /// Return
     ///
@@ -341,13 +338,13 @@ impl<T: Config> Pallet<T> {
                         Some("type"),
                     )?
                     .ok_or(Error::<T>::BadChallengeValue)?;
-                    let proof = Self::find_json_value(
+                    let hex_proof = Self::find_json_value(
                         &obj,
                         "proof",
                         Some("proofValue"),
                     )?
                     .ok_or(Error::<T>::BadChallengeValue)?;
-
+                    let proof = hex::decode(hex_proof).map_err(|_| Error::<T>::ErrorDecodeHex)?;
                     let mut raw_payload: Vec<u8> = Default::default();
                     let raw_owner_did = owner_did.clone();
                     URAuthSignedPayload::<T>::Challenge {

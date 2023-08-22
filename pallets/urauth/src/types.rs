@@ -34,15 +34,13 @@ impl URI {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct Metadata {
-    pub uri: Vec<u8>,
     pub owner_did: Vec<u8>,
     pub challenge_value: Randomness,
 }
 
 impl Metadata {
-    pub fn new(uri: Vec<u8>, owner_did: Vec<u8>, challenge_value: Randomness) -> Self {
+    pub fn new(owner_did: Vec<u8>, challenge_value: Randomness) -> Self {
         Self {
-            uri,
             owner_did,
             challenge_value,
         }
@@ -232,7 +230,7 @@ pub enum StorageProvider {
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct ContentAddress {
     storage_provider: StorageProvider,
-    cid: Vec<u8>, // ToDo: CID type
+    cid: Vec<u8>, 
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]

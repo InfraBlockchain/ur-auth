@@ -7364,6 +7364,7 @@ dependencies = [
  "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "hex",
  "lite-json",
  "nuuid",
  "parity-scale-codec",
@@ -7372,6 +7373,7 @@ dependencies = [
  "sp-consensus-vrf",
  "sp-core",
  "sp-io",
+ "sp-keyring",
  "sp-runtime",
  "sp-std",
 ]
