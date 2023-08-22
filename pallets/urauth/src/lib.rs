@@ -88,6 +88,9 @@ pub mod pallet {
     #[pallet::unbounded]
     pub type URAuthConfig<T: Config> = StorageValue<_, ChallengeValueConfig, ValueQuery>;
 
+    #[pallet::storage]
+    pub type Counter<T: Config> = StorageValue<_, URAuthDocCount, ValueQuery>;
+
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
@@ -95,6 +98,7 @@ pub mod pallet {
             uri: URI,
         },
         URAuthTreeRegistered {
+            count: URAuthDocCount,
             uri: URI,
             urauth_doc: URAuthDoc<T::AccountId, T::Balance>,
         },
@@ -113,6 +117,7 @@ pub mod pallet {
 
     #[pallet::error]
     pub enum Error<T> {
+        Overflow,
         BadProof,
         BadSigner,
         BadChallengeValue,
@@ -202,14 +207,18 @@ pub mod pallet {
             let res = vs.submit(member_count, (who, BlakeTwo256::hash(&challenge_value)))?;
             match res {
                 VerificationResult::Complete => {
+                    let mut count = Counter::<T>::get();
+                    count = count.checked_add(1).ok_or(Error::<T>::Overflow)?;
                     let urauth_doc: URAuthDoc<T::AccountId, T::Balance> = URAuthDoc::new(
-                        uri.clone().inner(),
+                        Self::doc_id(count),
                         uri.clone(),
                         MultiDID::new(owner, 1)
                     );
+                    Counter::<T>::put(count);
                     URAuthTree::<T>::insert(&uri, urauth_doc.clone());
                     Self::deposit_event(
                         Event::<T>::URAuthTreeRegistered {
+                            count,
                             uri: uri.clone(),
                             urauth_doc
                         }
@@ -247,10 +256,10 @@ pub mod pallet {
 
 impl<T: Config> Pallet<T> {
 
-    // fn doc_id(index: ) -> [u8; 16] {
-    //     let uuid = nuuid::Uuid::from_bytes();
-    //     uuid.to_bytes()
-    // }
+    fn doc_id(index: u128) -> [u8; 16] {
+        let b = index.to_le_bytes();
+        nuuid::Uuid::from_bytes(b).to_bytes()
+    }
 
     // ToDo
     fn challenge_value() -> Randomness {
@@ -265,9 +274,8 @@ impl<T: Config> Pallet<T> {
         raw_owner_did: &Vec<u8>,
     ) -> Result<T::AccountId, DispatchError> {
         let multi_sig = Self::raw_signature_to_multi_sig(&proof_type, &sig)?;
-        sp_std::if_std! { println!("Multi Sig Runtime => {:?}", multi_sig) }
         let signer = Self::account_id32_from_raw_did(raw_owner_did.clone())?;
-        if !raw_payload.using_encoded(|m| multi_sig.verify(m, &signer)) {
+        if !multi_sig.verify(&raw_payload[..], &signer) {
             return Err(Error::<T>::BadProof.into());
         }
         let uri_metadata = URIMetadata::<T>::get(uri).ok_or(Error::<T>::BadRequest)?;
@@ -289,17 +297,14 @@ impl<T: Config> Pallet<T> {
         if proof_type.contains("ed25519") {
             let sig =
                 ed25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
-            Ok(MultiSignature::Ed25519(sig))
+            Ok(sig.into())
         } else if proof_type.contains("sr25519") {
             let sig =
                 sr25519::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
-            sp_std::if_std! { 
-                println!(" Signature Byte Runtime => {:?}", sig.0); 
-            }
             Ok(sig.into())
         } else {
             let sig = ecdsa::Signature::try_from(&sig[..]).map_err(|_| Error::<T>::ErrorConvertToSignature)?;
-            Ok(MultiSignature::Ecdsa(sig))
+            Ok(sig.into())
         }
     }
 

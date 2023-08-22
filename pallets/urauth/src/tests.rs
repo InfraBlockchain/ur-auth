@@ -238,7 +238,7 @@ fn create_signature(keyring: sp_keyring::AccountKeyring, sig_type: SigType) -> M
     };
 
     let sig = keyring.sign(&msg);
-    MultiSignature::Sr25519(sig) 
+    sig.into()
 }
 
 fn generate_did(account_id: &str) -> String {
@@ -348,24 +348,35 @@ fn verify_challenge_works() {
     let owner_did = generate_did(ALICE_SS58);
     let challenge_value = "[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]";
     let timestamp = "2023-07-28T10:17:21Z";
-    let sig = create_signature(Alice, SigType::Challenge(uri.clone(), owner_did.clone(), challenge_value.into(), timestamp.into()));
-    println!("Multi Signature Offchain => {:?}", sig);
-    let msg = (uri, owner_did.as_bytes().to_vec(), challenge_value.as_bytes().to_vec(), timestamp.as_bytes().to_vec()).encode();
+    let msg = (uri.clone(), owner_did.as_bytes().to_vec(), challenge_value.as_bytes().to_vec(), timestamp.as_bytes().to_vec()).encode();
     let sig = Alice.sign(&msg);
-    println!(" Signature Byte Offchain => {:?}", sig.0);
-    let hex_sig = hex::encode(sig);
+    let request_signature = create_signature(Alice, SigType::URI("www.website1.com".into(), generate_did(ALICE_SS58)));
+
     let json_str = generate_json(
         "www.website1.com".into(), 
-        owner_did,
+        owner_did.clone(),
         challenge_value.into(),
         timestamp.into(),
         "Sr25519Signature2020".into(),
-        hex_sig.clone()
+        hex::encode(sig).clone()
     );
-    assert!(hex::decode(hex_sig).unwrap().len() == 64);
+    
     new_test_ext().execute_with(|| {
         assert_ok!(
             URAuth::add_oracle_member(RuntimeOrigin::root(), Alice.to_account_id())
+        );
+
+        assert_ok!(
+            URAuth::urauth_request_register_domain_owner(
+                RuntimeOrigin::signed(
+                    Alice.to_account_id()
+                ), 
+                uri.clone(), 
+                owner_did.as_bytes().to_vec(), 
+                Some(Randomness::default()), 
+                MultiSigner::Sr25519(Alice.public()), 
+                request_signature
+            )
         );
 
         assert_ok!(
@@ -374,6 +385,15 @@ fn verify_challenge_works() {
                 json_str.as_bytes().to_vec()
             )
         );
+
+        System::assert_has_event(
+            URAuthEvent::<Test>::VerificationInfo {
+                uri: uri.clone(),
+                progress_status: VerificationResult::Complete
+            }.into()
+        );
+        let urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
+        println!("{:?}", urauth_doc);
     });
 }
 
@@ -436,5 +456,6 @@ fn fixed_str_works() {
     let len = raw.len();
     println!("{:?}", len);
 }
+
 
 

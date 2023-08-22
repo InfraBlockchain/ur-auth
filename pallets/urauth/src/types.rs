@@ -7,10 +7,11 @@ use sp_std::collections::btree_map::BTreeMap;
 
 pub type DIDWeight = u16;
 pub type OwnerDID = Vec<u8>;
-pub type DocId = Vec<u8>;
+pub type DocId = [u8; 16];
 pub type DomainName = Vec<u8>;
 pub type ApprovalCount = u32;
 pub type Threshold = u32;
+pub type URAuthDocCount = u128;
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Default, RuntimeDebug, MaxEncodedLen, TypeInfo)]
 pub enum Status {
