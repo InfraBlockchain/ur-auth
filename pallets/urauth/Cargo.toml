@@ -20,7 +20,7 @@ lite-json = { version = "0.2.0", default-features = false }
 bs58 = { version = "0.4.0", default-features = false }
 nuuid = { version = "0.5.0", default-features = false }
 fixedstr = {version = "0.4", default-features = false }
-hex = { version = "0.4", default-features = false }
+hex = { version = "0.4.3", default-features = false }
 
 # Substrate
 frame-benchmarking = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, optional = true, branch = "master" }

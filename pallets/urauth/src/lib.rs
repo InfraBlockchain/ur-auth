@@ -345,7 +345,8 @@ impl<T: Config> Pallet<T> {
                         .ok_or(Error::<T>::BadChallengeValue)?;
                     let hex_proof = Self::find_json_value(&obj, "proof", Some("proofValue"))?
                         .ok_or(Error::<T>::BadChallengeValue)?;
-                    let proof = hex::decode(hex_proof).map_err(|_| Error::<T>::ErrorDecodeHex)?;
+                    let mut proof = [0u8; 64];
+                    hex::decode_to_slice(hex_proof, &mut proof  as &mut [u8]).map_err(|_| Error::<T>::ErrorDecodeHex)?;
                     let mut raw_payload: Vec<u8> = Default::default();
                     let raw_owner_did = owner_did.clone();
                     URAuthSignedPayload::<T>::Challenge {
@@ -356,7 +357,7 @@ impl<T: Config> Pallet<T> {
                     }
                     .using_encoded(|m| raw_payload = m.to_vec());
 
-                    return Ok((proof, proof_type, raw_payload, URI::new(uri), raw_owner_did));
+                    return Ok((proof.to_vec(), proof_type, raw_payload, URI::new(uri), raw_owner_did));
                 }
                 _ => return Err(Error::<T>::BadChallengeValue.into()),
             },
