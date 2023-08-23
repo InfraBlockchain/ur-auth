@@ -511,10 +511,8 @@ fn update_urauth_doc_works() {
         URI::new("website1.com".into()), 
         MultiDID::new(Alice.to_account_id(), 1), 0u128
     );
-    urauth_doc.try_update_doc(
-        UpdateDocField::MultiDID(WeightedDID { did: Bob.to_account_id(), weight: 1 }), 
-        0u128, 
-        None
-    ).unwrap();
+    urauth_doc.update_doc(
+        &UpdateDocField::MultiDID(WeightedDID { did: Bob.to_account_id(), weight: 1 })
+    );
     println!("{:?}", urauth_doc);
 }

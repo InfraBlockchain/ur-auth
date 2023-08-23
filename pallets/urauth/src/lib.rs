@@ -250,7 +250,9 @@ pub mod pallet {
 
             let _ = ensure_signed(origin)?;
             let mut urauth_doc = URAuthTree::<T>::get(&uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
-            urauth_doc.try_update_doc(update_field, updated_at, proof)?;
+            urauth_doc.update_doc(&update_field);
+            let owner = Self::try_verify_urauth_doc_proof(&urauth_doc, updated_at, proof)?;
+            Self::try_store_updated_urauth_doc(&urauth_doc, owner, update_field)?;
 
             Ok(())
         }
@@ -321,6 +323,37 @@ impl<T: Config> Pallet<T> {
     ) -> Result<(), DispatchError> {
         let cv = ChallengeValue::<T>::get(&uri).ok_or(Error::<T>::ChallengeValueMissing)?;
         ensure!(challenge == cv.to_vec(), Error::<T>::BadChallengeValue);
+        Ok(())
+    }
+
+    fn try_verify_urauth_doc_proof(urauth_doc: &URAuthDoc<T>, updated_at: u128, proof: Option<Proof>) -> Result<AccountId32, DispatchError> {
+        let (owner_did, sig) = match proof.ok_or(Error::<T>::ProofMissing)? {
+            Proof::ProofV1 { did, proof } => (did, proof)
+        };
+        let payload = URAuthSignedPayload::<T>::Update { urauth_doc: urauth_doc.clone(), updated_at, owner_did: owner_did.clone() };
+        let signer = Pallet::<T>::account_id32_from_raw_did(owner_did)?;
+        if !payload.using_encoded(|m| sig.verify(m, &signer)) {
+            return Err(Error::<T>::BadProof.into())
+        }
+
+        Ok(signer)
+    }
+
+    fn try_store_updated_urauth_doc(urauth_doc: &URAuthDoc<T>, signer: AccountId32, updated_field: UpdateDocField<T::AccountId>) -> Result<(), DispatchError> {
+        let multi_did = urauth_doc.get_multi_did();
+        let mut remaining = UpdateDocStatus::<T>::get(&urauth_doc.id).map_or(multi_did.threshold, |v| v);
+        let uri = urauth_doc.get_uri();
+        let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
+        let did_weight = multi_did.get_did_weight(&account_id).ok_or(Error::<T>::AccountMissing)?;
+        if did_weight >= remaining {
+            URAuthTree::<T>::insert(&uri, urauth_doc.clone());
+            UpdateDocStatus::<T>::remove(&urauth_doc.id);
+            Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated { updated_field, urauth_doc: urauth_doc.clone() })
+        } else {
+            remaining = remaining.saturating_sub(did_weight);
+            UpdateDocStatus::<T>::insert(&urauth_doc.id, remaining);
+        }
+
         Ok(())
     }
 

@@ -208,9 +208,9 @@ impl<Account> WeightedDID<Account> {
 // Multisig-enabled DID
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct MultiDID<Account> {
-    dids: Vec<WeightedDID<Account>>,
+    pub dids: Vec<WeightedDID<Account>>,
     // Sum(weight) >= threshold
-    threshold: DIDWeight,
+    pub threshold: DIDWeight,
 }
 
 impl<Account: PartialEq> MultiDID<Account> {
@@ -304,8 +304,8 @@ pub enum Proof {
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebugNoBound, TypeInfo)]
 #[scale_info(skip_type_params(T))]
 pub struct URAuthDoc<T: Config> {
-    id: DocId,
-    uri: URI,
+    pub id: DocId,
+    pub uri: URI,
     created_at: u128,
     updated_at: u128,
     multi_owner_did: MultiDID<T::AccountId>,
@@ -332,21 +332,16 @@ impl<T: Config> URAuthDoc<T> {
         }
     }
 
-    fn get_uri(&self) -> URI {
+    pub fn get_uri(&self) -> URI {
         self.uri.clone()
     }
 
-    fn get_multi_did(&self) -> MultiDID<T::AccountId> {
+    pub fn get_multi_did(&self) -> MultiDID<T::AccountId> {
         self.multi_owner_did.clone()
     }
 
-    pub fn try_update_doc(&mut self, update_field: UpdateDocField<T::AccountId>, updated_at: u128, proof: Option<Proof>) -> Result<(), DispatchError> {
-
-        let (owner_did, sig) = match proof.ok_or(Error::<T>::ProofMissing)? {
-            Proof::ProofV1 { did, proof } => (did, proof)
-        };
-
-        let urauth_doc = match update_field.clone() {
+    pub fn update_doc(&mut self, update_field: &UpdateDocField<T::AccountId>) {
+        match update_field.clone() {
             UpdateDocField::MultiDID(weighted_did) => {
                 self.multi_owner_did.add_owner(weighted_did);
                 self
@@ -368,25 +363,6 @@ impl<T: Config> URAuthDoc<T> {
                 self
             }
         };
-        let payload = URAuthSignedPayload::<T>::Update { urauth_doc: urauth_doc.clone(), updated_at, owner_did: owner_did.clone() };
-        let signer = Pallet::<T>::account_id32_from_raw_did(owner_did)?;
-        if !payload.using_encoded(|m| sig.verify(m, &signer)) {
-            return Err(Error::<T>::BadProof.into())
-        }
-        let multi_did = urauth_doc.get_multi_did();
-        let mut remaining = UpdateDocStatus::<T>::get(&urauth_doc.id).map_or(multi_did.threshold, |v| v);
-        let uri = urauth_doc.get_uri();
-        let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
-        let did_weight = multi_did.get_did_weight(&account_id).ok_or(Error::<T>::AccountMissing)?;
-        if did_weight >= remaining {
-            URAuthTree::<T>::insert(&uri, urauth_doc.clone());
-            UpdateDocStatus::<T>::remove(&urauth_doc.id);
-            Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated { updated_field: update_field, urauth_doc: urauth_doc.clone() })
-        } else {
-            remaining = remaining.saturating_sub(did_weight);
-            UpdateDocStatus::<T>::insert(&urauth_doc.id, remaining);
-        }
-        Ok(())
     }
 }
 
