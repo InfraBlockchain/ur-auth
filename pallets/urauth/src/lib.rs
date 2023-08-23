@@ -131,6 +131,7 @@ pub mod pallet {
         ProofMissing,
         ChallengeValueMissing,
         ChallengeValueNotProvided,
+        URAuthTreeNotRegistered,
         AlreadySubmitted,
         MaxOracleMembers,
     }
@@ -238,6 +239,23 @@ pub mod pallet {
         }
 
         #[pallet::call_index(3)]
+        #[pallet::weight(1_000)]
+        pub fn update_urauth_doc(
+            origin: OriginFor<T>,
+            uri: URI,
+            update_field: UpdateDocField<T::AccountId>,
+            updated_at: u128,
+            proof: Option<Proof>,
+        ) -> DispatchResult {
+
+            let _ = ensure_signed(origin)?;
+            let mut urauth_doc = URAuthTree::<T>::get(&uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
+            urauth_doc.try_update_doc(update_field, updated_at, proof)?;
+
+            Ok(())
+        }
+
+        #[pallet::call_index(4)]
         #[pallet::weight(1_000)]
         pub fn add_oracle_member(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
             T::AuthorizedOrigin::ensure_origin(origin)?;

@@ -340,13 +340,13 @@ impl<T: Config> URAuthDoc<T> {
         self.multi_owner_did.clone()
     }
 
-    pub fn try_update_doc(&mut self, field: UpdateDocField<T::AccountId>, updated_at: u128, proof: Option<Proof>) -> Result<(), DispatchError> {
+    pub fn try_update_doc(&mut self, update_field: UpdateDocField<T::AccountId>, updated_at: u128, proof: Option<Proof>) -> Result<(), DispatchError> {
 
         let (owner_did, sig) = match proof.ok_or(Error::<T>::ProofMissing)? {
             Proof::ProofV1 { did, proof } => (did, proof)
         };
 
-        let urauth_doc = match field.clone() {
+        let urauth_doc = match update_field.clone() {
             UpdateDocField::MultiDID(weighted_did) => {
                 self.multi_owner_did.add_owner(weighted_did);
                 self
@@ -381,7 +381,7 @@ impl<T: Config> URAuthDoc<T> {
         if did_weight >= remaining {
             URAuthTree::<T>::insert(&uri, urauth_doc.clone());
             UpdateDocStatus::<T>::remove(&urauth_doc.id);
-            Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated { updated_field: field, urauth_doc: urauth_doc.clone() })
+            Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated { updated_field: update_field, urauth_doc: urauth_doc.clone() })
         } else {
             remaining = remaining.saturating_sub(did_weight);
             UpdateDocStatus::<T>::insert(&urauth_doc.id, remaining);
