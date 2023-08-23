@@ -12,6 +12,7 @@ pub type DomainName = Vec<u8>;
 pub type ApprovalCount = u32;
 pub type Threshold = u32;
 pub type URAuthDocCount = u128;
+pub type RemainingThreshold = u16;
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Default, RuntimeDebug, MaxEncodedLen, TypeInfo)]
 pub enum Status {
@@ -157,7 +158,8 @@ pub enum URAuthSignedPayload<T: Config> {
         timestamp: Vec<u8>,
     },
     Update {
-        urauth_doc: URAuthDoc<T::AccountId>,
+        urauth_doc: URAuthDoc<T>,
+        updated_at: u128,
         owner_did: OwnerDID,
     },
 }
@@ -174,8 +176,9 @@ impl<T: Config> Encode for URAuthSignedPayload<T> {
             } => (uri, owner_did, challenge, timestamp).encode(),
             URAuthSignedPayload::Update {
                 urauth_doc,
+                updated_at,
                 owner_did,
-            } => (urauth_doc, owner_did).encode(),
+            } => (urauth_doc, updated_at, owner_did).encode(),
         };
         if raw_payload.len() > 256 {
             f(&sp_io::hashing::blake2_256(&raw_payload)[..])
@@ -210,12 +213,25 @@ pub struct MultiDID<Account> {
     threshold: DIDWeight,
 }
 
-impl<Account> MultiDID<Account> {
+impl<Account: PartialEq> MultiDID<Account> {
     pub fn new(acc: Account, weight: DIDWeight) -> Self {
         Self {
             dids: sp_std::vec![WeightedDID::<Account>::new(acc, weight)],
             threshold: weight,
         }
+    }
+
+    pub fn add_owner(&mut self, weighted_did: WeightedDID<Account>) {
+        self.dids.push(weighted_did);
+    }
+
+    pub fn get_did_weight(self, who: &Account) -> Option<DIDWeight> {
+        if let Some(weighted_did) = self.dids.into_iter().find(|weighted_did| {
+            &weighted_did.did == who
+        }) {
+            return Some(weighted_did.weight)
+        }
+        None
     }
 }
 
@@ -282,16 +298,17 @@ pub enum ContentType {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum Proof {
-    ProofV1 { proof_value: MultiSignature },
+    ProofV1 { did: Vec<u8>, proof: MultiSignature },
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct URAuthDoc<Account> {
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebugNoBound, TypeInfo)]
+#[scale_info(skip_type_params(T))]
+pub struct URAuthDoc<T: Config> {
     id: DocId,
     uri: URI,
     created_at: u128,
     updated_at: u128,
-    owner_did: MultiDID<Account>,
+    multi_owner_did: MultiDID<T::AccountId>,
     identity_info: Option<Vec<Vec<u8>>>,
     content_metadata: Option<ContentMetadata>,
     copyright_info: Option<CopyrightInfo>,
@@ -299,12 +316,12 @@ pub struct URAuthDoc<Account> {
     proofs: Option<Vec<Proof>>,
 }
 
-impl<Account> URAuthDoc<Account> {
-    pub fn new(id: DocId, uri: URI, owner_did: MultiDID<Account>, created_at: u128) -> Self {
+impl<T: Config> URAuthDoc<T> {
+    pub fn new(id: DocId, uri: URI, multi_owner_did: MultiDID<T::AccountId>, created_at: u128) -> Self {
         Self {
             id,
             uri,
-            owner_did,
+            multi_owner_did,
             created_at,
             updated_at: created_at,
             identity_info: None,
@@ -314,4 +331,70 @@ impl<Account> URAuthDoc<Account> {
             proofs: None,
         }
     }
+
+    fn get_uri(&self) -> URI {
+        self.uri.clone()
+    }
+
+    fn get_multi_did(&self) -> MultiDID<T::AccountId> {
+        self.multi_owner_did.clone()
+    }
+
+    pub fn try_update_doc(&mut self, field: UpdateDocField<T::AccountId>, updated_at: u128, proof: Option<Proof>) -> Result<(), DispatchError> {
+
+        let (owner_did, sig) = match proof.ok_or(Error::<T>::ProofMissing)? {
+            Proof::ProofV1 { did, proof } => (did, proof)
+        };
+
+        let urauth_doc = match field.clone() {
+            UpdateDocField::MultiDID(weighted_did) => {
+                self.multi_owner_did.add_owner(weighted_did);
+                self
+            },
+            UpdateDocField::IdentityInfo(identity_info) => { 
+                self.identity_info = identity_info;
+                self
+            },
+            UpdateDocField::ContentMetadata(content_metadata) => { 
+                self.content_metadata = content_metadata;
+                self
+            },
+            UpdateDocField::CopyrightInfo(copyright_info) => { 
+                self.copyright_info = copyright_info;
+                self
+            },
+            UpdateDocField::AccessRules(access_rules) => {
+                self.access_rules = access_rules;
+                self
+            }
+        };
+        let payload = URAuthSignedPayload::<T>::Update { urauth_doc: urauth_doc.clone(), updated_at, owner_did: owner_did.clone() };
+        let signer = Pallet::<T>::account_id32_from_raw_did(owner_did)?;
+        if !payload.using_encoded(|m| sig.verify(m, &signer)) {
+            return Err(Error::<T>::BadProof.into())
+        }
+        let multi_did = urauth_doc.get_multi_did();
+        let mut remaining = UpdateDocStatus::<T>::get(&urauth_doc.id).map_or(multi_did.threshold, |v| v);
+        let uri = urauth_doc.get_uri();
+        let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
+        let did_weight = multi_did.get_did_weight(&account_id).ok_or(Error::<T>::AccountMissing)?;
+        if did_weight >= remaining {
+            URAuthTree::<T>::insert(&uri, urauth_doc.clone());
+            UpdateDocStatus::<T>::remove(&urauth_doc.id);
+            Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated { updated_field: field, urauth_doc: urauth_doc.clone() })
+        } else {
+            remaining = remaining.saturating_sub(did_weight);
+            UpdateDocStatus::<T>::insert(&urauth_doc.id, remaining);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub enum UpdateDocField<Account> {
+    MultiDID(WeightedDID<Account>),
+    IdentityInfo(Option<Vec<Vec<u8>>>),
+    ContentMetadata(Option<ContentMetadata>),
+    CopyrightInfo(Option<CopyrightInfo>),
+    AccessRules(Option<Vec<AccessRule>>)
 }

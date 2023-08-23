@@ -52,7 +52,7 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::unbounded]
     pub type URAuthTree<T: Config> =
-        StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId>>;
+        StorageMap<_, Twox128, URI, URAuthDoc<T>>;
 
     #[pallet::storage]
     #[pallet::unbounded]
@@ -67,6 +67,9 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::unbounded]
     pub type ChallengeValue<T: Config> = StorageMap<_, Twox128, URI, Randomness>;
+
+    #[pallet::storage]
+    pub type UpdateDocStatus<T: Config> = StorageMap<_, Blake2_128Concat, DocId, RemainingThreshold>;
 
     #[pallet::storage]
     #[pallet::getter(fn oracle_members)]
@@ -89,7 +92,7 @@ pub mod pallet {
         URAuthTreeRegistered {
             count: URAuthDocCount,
             uri: URI,
-            urauth_doc: URAuthDoc<T::AccountId>,
+            urauth_doc: URAuthDoc<T>,
         },
         VerificationSubmitted {
             member: T::AccountId,
@@ -98,6 +101,10 @@ pub mod pallet {
         VerificationInfo {
             uri: URI,
             progress_status: VerificationResult,
+        },
+        URAuthDocUpdated {
+            updated_field: UpdateDocField<T::AccountId>,
+            urauth_doc: URAuthDoc<T>
         },
         URIRemoved {
             uri: URI,
@@ -120,6 +127,9 @@ pub mod pallet {
         NotOracleMember,
         URINotVerfied,
         AccountMissing,
+        OwnerMissing,
+        ProofMissing,
+        ChallengeValueMissing,
         ChallengeValueNotProvided,
         AlreadySubmitted,
         MaxOracleMembers,
@@ -182,7 +192,7 @@ pub mod pallet {
             );
 
             // Parse json
-            let (sig, proof_type, raw_payload, uri, raw_owner_did) =
+            let (sig, proof_type, raw_payload, uri, raw_owner_did, challenge) =
                 Self::try_handle_challenge_value(&challenge_value)?;
 
             // 1. OwnerDID of URI == Challenge Value's DID
@@ -193,6 +203,7 @@ pub mod pallet {
                 raw_payload,
                 &uri,
                 &raw_owner_did,
+                challenge,
             )?;
             let member_count = Self::oracle_members().len();
             let mut vs = if let Some(vs) = URIVerificationInfo::<T>::get(&uri) {
@@ -205,7 +216,7 @@ pub mod pallet {
                 VerificationResult::Complete => {
                     let mut count = Counter::<T>::get();
                     count = count.checked_add(1).ok_or(Error::<T>::Overflow)?;
-                    let urauth_doc: URAuthDoc<T::AccountId> =
+                    let urauth_doc: URAuthDoc<T> =
                         URAuthDoc::new(Self::doc_id(count), uri.clone(), MultiDID::new(owner, 1), Self::unix_time());
                     Counter::<T>::put(count);
                     URAuthTree::<T>::insert(&uri, urauth_doc.clone());
@@ -261,6 +272,7 @@ impl<T: Config> Pallet<T> {
         raw_payload: Vec<u8>,
         uri: &URI,
         raw_owner_did: &Vec<u8>,
+        challenge: Vec<u8>
     ) -> Result<T::AccountId, DispatchError> {
         let multi_sig = Self::raw_signature_to_multi_sig(&proof_type, &sig)?;
         let signer = Self::account_id32_from_raw_did(raw_owner_did.clone())?;
@@ -271,6 +283,7 @@ impl<T: Config> Pallet<T> {
         let signer = Self::account_id_from_source(AccountIdSource::DID(raw_owner_did.clone()))?;
         Self::check_is_valid_owner(&uri_metadata.owner_did, &signer)
             .map_err(|_| Error::<T>::BadSigner)?;
+        Self::check_challenge_value(uri, challenge)?;
         Ok(signer)
     }
 
@@ -281,6 +294,15 @@ impl<T: Config> Pallet<T> {
         let owner_account_id =
             Self::account_id_from_source(AccountIdSource::DID(raw_owner_did.clone()))?;
         ensure!(&owner_account_id == signer, Error::<T>::BadSigner);
+        Ok(())
+    }
+
+    fn check_challenge_value(
+        uri: &URI,
+        challenge: Vec<u8>
+    ) -> Result<(), DispatchError> {
+        let cv = ChallengeValue::<T>::get(&uri).ok_or(Error::<T>::ChallengeValueMissing)?;
+        ensure!(challenge == cv.to_vec(), Error::<T>::BadChallengeValue);
         Ok(())
     }
 
@@ -318,7 +340,7 @@ impl<T: Config> Pallet<T> {
     /// (Signature, RuntimeGereratedProof, AccountId)
     fn try_handle_challenge_value(
         challenge_value: &Vec<u8>,
-    ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, URI, Vec<u8>), DispatchError> {
+    ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, URI, Vec<u8>, Vec<u8>), DispatchError> {
         let json_str = sp_std::str::from_utf8(challenge_value)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
 
@@ -341,6 +363,9 @@ impl<T: Config> Pallet<T> {
                     let mut proof = [0u8; 64];
                     hex::decode_to_slice(hex_proof, &mut proof as &mut [u8])
                         .map_err(|_| Error::<T>::ErrorDecodeHex)?;
+                    let mut challenge_bytes = [0u8; 32];
+                    hex::decode_to_slice(challenge.clone(), &mut challenge_bytes as &mut [u8])
+                        .map_err(|_| Error::<T>::ErrorDecodeHex)?;
                     let mut raw_payload: Vec<u8> = Default::default();
                     let raw_owner_did = owner_did.clone();
                     URAuthSignedPayload::<T>::Challenge {
@@ -357,6 +382,7 @@ impl<T: Config> Pallet<T> {
                         raw_payload,
                         URI::new(uri),
                         raw_owner_did,
+                        challenge_bytes.to_vec(),
                     ));
                 }
                 _ => return Err(Error::<T>::BadChallengeValue.into()),

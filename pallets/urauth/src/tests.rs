@@ -283,7 +283,12 @@ fn urauth_request_register_domain_owner_works() {
     let uri = URI::new("www.website1.com".as_bytes().to_vec());
     let owner_did = generate_did(ALICE_SS58);
     let challenge_value = Some(Randomness::default());
-    println!("{:?}", challenge_value);
+    println!("{:?}", challenge_value.unwrap());
+    let mut bytes = [0u8; 64];
+    let encoded = hex::encode(challenge_value.unwrap());
+    hex::encode_to_slice(challenge_value.unwrap(), &mut bytes).unwrap();
+    let decoded = hex::decode(bytes).unwrap();
+    println!("Decoded => {:?}", decoded.len());
     let signer = MultiSigner::Sr25519(Alice.public());
     let signature = create_signature(
         Alice,
@@ -497,4 +502,19 @@ fn fixed_str_works() {
     let raw = proof_type.as_bytes().to_vec();
     let len = raw.len();
     println!("{:?}", len);
+}
+
+#[test]
+fn update_urauth_doc_works() {
+    let mut urauth_doc = URAuthDoc::<Test>::new(
+        Default::default(), 
+        URI::new("website1.com".into()), 
+        MultiDID::new(Alice.to_account_id(), 1), 0u128
+    );
+    urauth_doc.try_update_doc(
+        UpdateDocField::MultiDID(WeightedDID { did: Bob.to_account_id(), weight: 1 }), 
+        0u128, 
+        None
+    ).unwrap();
+    println!("{:?}", urauth_doc);
 }

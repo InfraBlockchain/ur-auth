@@ -5,3 +5,4 @@ runtime/**/target
 .vscode
 .idea
 /scripts/benchmarking/benchmarking_errors.txt
+zombienet-macos
