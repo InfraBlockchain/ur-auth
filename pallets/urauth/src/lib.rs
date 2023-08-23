@@ -1,19 +1,18 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use codec::{Codec, Encode, MaxEncodedLen};
+use codec::Encode;
 use fixedstr::zstr;
-use scale_info::TypeInfo;
 
-use frame_support::{pallet_prelude::*, BoundedVec};
+use frame_support::{pallet_prelude::*, BoundedVec, traits::UnixTime };
 
 use frame_system::pallet_prelude::*;
 use sp_consensus_vrf::schnorrkel::Randomness;
 use sp_core::*;
 use sp_runtime::{
     traits::{
-        AtLeast32BitUnsigned, BlakeTwo256, IdentifyAccount, MaybeSerializeDeserialize, Verify,
+        BlakeTwo256, IdentifyAccount, Verify,
     },
-    AccountId32, FixedPointOperand, MultiSignature, MultiSigner,
+    AccountId32, MultiSignature, MultiSigner,
 };
 use sp_std::vec::Vec;
 
@@ -43,19 +42,9 @@ pub mod pallet {
     pub trait Config: frame_system::Config {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
-        type MaxOracleMemembers: Get<u32>;
+        type UnixTime: UnixTime;
 
-        type Balance: Parameter
-            + Member
-            + AtLeast32BitUnsigned
-            + Codec
-            + Default
-            + Copy
-            + MaybeSerializeDeserialize
-            + sp_std::fmt::Debug
-            + MaxEncodedLen
-            + TypeInfo
-            + FixedPointOperand;
+        type MaxOracleMemembers: Get<u32>;
 
         type AuthorizedOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
@@ -63,7 +52,7 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::unbounded]
     pub type URAuthTree<T: Config> =
-        StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId, T::Balance>>;
+        StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId>>;
 
     #[pallet::storage]
     #[pallet::unbounded]
@@ -100,7 +89,7 @@ pub mod pallet {
         URAuthTreeRegistered {
             count: URAuthDocCount,
             uri: URI,
-            urauth_doc: URAuthDoc<T::AccountId, T::Balance>,
+            urauth_doc: URAuthDoc<T::AccountId>,
         },
         VerificationSubmitted {
             member: T::AccountId,
@@ -216,8 +205,8 @@ pub mod pallet {
                 VerificationResult::Complete => {
                     let mut count = Counter::<T>::get();
                     count = count.checked_add(1).ok_or(Error::<T>::Overflow)?;
-                    let urauth_doc: URAuthDoc<T::AccountId, T::Balance> =
-                        URAuthDoc::new(Self::doc_id(count), uri.clone(), MultiDID::new(owner, 1));
+                    let urauth_doc: URAuthDoc<T::AccountId> =
+                        URAuthDoc::new(Self::doc_id(count), uri.clone(), MultiDID::new(owner, 1), Self::unix_time());
                     Counter::<T>::put(count);
                     URAuthTree::<T>::insert(&uri, urauth_doc.clone());
                     Self::deposit_event(Event::<T>::URAuthTreeRegistered {
@@ -256,6 +245,10 @@ impl<T: Config> Pallet<T> {
         let b = index.to_le_bytes();
         nuuid::Uuid::from_bytes(b).to_bytes()
     }
+
+    fn unix_time() -> u128 {
+		T::UnixTime::now().as_millis()
+	}
 
     // ToDo
     fn challenge_value() -> Randomness {

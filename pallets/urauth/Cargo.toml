@@ -36,6 +36,7 @@ sp-consensus-vrf = { git = "https://github.com/InfraBlockchain/infra-substrate",
 [dev-dependencies]
 sp-keyring = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 serde = { version = "1.0.132" }
+pallet-timestamp = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 
 [features]
 default = ["std"]

@@ -7367,6 +7367,7 @@ dependencies = [
  "hex",
  "lite-json",
  "nuuid",
+ "pallet-timestamp",
  "parity-scale-codec",
  "scale-info",
  "serde",

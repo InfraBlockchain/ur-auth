@@ -157,7 +157,7 @@ pub enum URAuthSignedPayload<T: Config> {
         timestamp: Vec<u8>,
     },
     Update {
-        urauth_doc: URAuthDoc<T::AccountId, T::Balance>,
+        urauth_doc: URAuthDoc<T::AccountId>,
         owner_did: OwnerDID,
     },
 }
@@ -242,10 +242,10 @@ pub enum CopyrightInfo {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub enum AccessRule<Balance> {
+pub enum AccessRule {
     AccessRuleV1 {
         path: Vec<u8>,
-        rules: Vec<Rule<Balance>>,
+        rules: Vec<Rule>,
     },
 }
 
@@ -253,21 +253,27 @@ pub enum AccessRule<Balance> {
 pub struct UserAgent(Vec<u8>);
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct Rule<Balance> {
-    user_agents: Vec<UserAgent>,                     // e.g "GPTBot"
-    allow: Vec<(ContentType, Balance, ContentSize)>, // e.g (Image, 1DUSD/MB)
+pub struct Rule {
+    user_agents: Vec<UserAgent>,                     
+    allow: Vec<(ContentType, Price)>, 
     disallow: Vec<ContentType>,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub enum ContentSize {
-    Mega,
-    Giga,
+pub enum PriceUnit {
+    USDPerMb,
+    KRWPerMb
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub struct Price {
+    pub price: u64,
+    pub decimals: u8,
+    pub unit: PriceUnit
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum ContentType {
-    Any,
     Image,
     Video,
     Text,
@@ -280,27 +286,27 @@ pub enum Proof {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct URAuthDoc<Account, Balance> {
+pub struct URAuthDoc<Account> {
     id: DocId,
     uri: URI,
-    created_at: u64,
-    updated_at: u64,
+    created_at: u128,
+    updated_at: u128,
     owner_did: MultiDID<Account>,
     identity_info: Option<Vec<Vec<u8>>>,
     content_metadata: Option<ContentMetadata>,
     copyright_info: Option<CopyrightInfo>,
-    access_rules: Option<Vec<AccessRule<Balance>>>,
+    access_rules: Option<Vec<AccessRule>>,
     proofs: Option<Vec<Proof>>,
 }
 
-impl<Account, Balance> URAuthDoc<Account, Balance> {
-    pub fn new(id: DocId, uri: URI, owner_did: MultiDID<Account>) -> Self {
+impl<Account> URAuthDoc<Account> {
+    pub fn new(id: DocId, uri: URI, owner_did: MultiDID<Account>, created_at: u128) -> Self {
         Self {
             id,
             uri,
             owner_did,
-            created_at: Default::default(),
-            updated_at: Default::default(),
+            created_at,
+            updated_at: created_at,
             identity_info: None,
             content_metadata: None,
             copyright_info: None,

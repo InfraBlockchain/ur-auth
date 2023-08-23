@@ -29,7 +29,8 @@ frame_support::construct_runtime!(
         UncheckedExtrinsic = UncheckedExtrinsic,
     {
         System: frame_system::{Pallet, Call, Config, Storage, Event<T>} = 1,
-        URAuth: pallet_urauth::{Pallet, Call, Storage, Event<T>} = 2,
+        Timestamp: pallet_timestamp::{Pallet, Call, Storage} = 2,
+        URAuth: pallet_urauth::{Pallet, Call, Storage, Event<T>} = 99,
     }
 );
 
@@ -65,13 +66,20 @@ impl frame_system::Config for Test {
     type MaxConsumers = frame_support::traits::ConstU32<16>;
 }
 
+impl pallet_timestamp::Config for Test {
+	type Moment = u64;
+	type OnTimestampSet = ();
+	type MinimumPeriod = frame_support::traits::ConstU64<5>;
+	type WeightInfo = ();
+}
+
 parameter_types! {
     pub const MaxOracleMemembers: u32 = 5;
 }
 
 impl pallet_urauth::Config for Test {
     type RuntimeEvent = RuntimeEvent;
-    type Balance = MockBalance;
+    type UnixTime = Timestamp;
     type MaxOracleMemembers = MaxOracleMemembers;
     type AuthorizedOrigin = EnsureRoot<MockAccountId>;
 }
