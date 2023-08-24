@@ -3,15 +3,13 @@
 use codec::Encode;
 use fixedstr::zstr;
 
-use frame_support::{pallet_prelude::*, BoundedVec, traits::UnixTime };
+use frame_support::{pallet_prelude::*, traits::UnixTime, BoundedVec};
 
 use frame_system::pallet_prelude::*;
 use sp_consensus_vrf::schnorrkel::Randomness;
 use sp_core::*;
 use sp_runtime::{
-    traits::{
-        BlakeTwo256, IdentifyAccount, Verify,
-    },
+    traits::{BlakeTwo256, IdentifyAccount, Verify},
     AccountId32, MultiSignature, MultiSigner,
 };
 use sp_std::vec::Vec;
@@ -51,8 +49,7 @@ pub mod pallet {
 
     #[pallet::storage]
     #[pallet::unbounded]
-    pub type URAuthTree<T: Config> =
-        StorageMap<_, Twox128, URI, URAuthDoc<T>>;
+    pub type URAuthTree<T: Config> = StorageMap<_, Twox128, URI, URAuthDoc<T>>;
 
     #[pallet::storage]
     #[pallet::unbounded]
@@ -69,7 +66,8 @@ pub mod pallet {
     pub type ChallengeValue<T: Config> = StorageMap<_, Twox128, URI, Randomness>;
 
     #[pallet::storage]
-    pub type UpdateDocStatus<T: Config> = StorageMap<_, Blake2_128Concat, DocId, RemainingThreshold>;
+    pub type UpdateDocStatus<T: Config> =
+        StorageMap<_, Blake2_128Concat, DocId, RemainingThreshold>;
 
     #[pallet::storage]
     #[pallet::getter(fn oracle_members)]
@@ -104,7 +102,7 @@ pub mod pallet {
         },
         URAuthDocUpdated {
             updated_field: UpdateDocField<T::AccountId>,
-            urauth_doc: URAuthDoc<T>
+            urauth_doc: URAuthDoc<T>,
         },
         URIRemoved {
             uri: URI,
@@ -217,8 +215,12 @@ pub mod pallet {
                 VerificationResult::Complete => {
                     let mut count = Counter::<T>::get();
                     count = count.checked_add(1).ok_or(Error::<T>::Overflow)?;
-                    let urauth_doc: URAuthDoc<T> =
-                        URAuthDoc::new(Self::doc_id(count), uri.clone(), MultiDID::new(owner, 1), Self::unix_time());
+                    let urauth_doc: URAuthDoc<T> = URAuthDoc::new(
+                        Self::doc_id(count),
+                        uri.clone(),
+                        MultiDID::new(owner, 1),
+                        Self::unix_time(),
+                    );
                     Counter::<T>::put(count);
                     URAuthTree::<T>::insert(&uri, urauth_doc.clone());
                     Self::deposit_event(Event::<T>::URAuthTreeRegistered {
@@ -247,9 +249,9 @@ pub mod pallet {
             updated_at: u128,
             proof: Option<Proof>,
         ) -> DispatchResult {
-
             let _ = ensure_signed(origin)?;
-            let mut urauth_doc = URAuthTree::<T>::get(&uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
+            let mut urauth_doc =
+                URAuthTree::<T>::get(&uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
             urauth_doc.update_doc(&update_field);
             let owner = Self::try_verify_urauth_doc_proof(&urauth_doc, updated_at, proof)?;
             Self::try_store_updated_urauth_doc(&urauth_doc, owner, update_field)?;
@@ -278,8 +280,8 @@ impl<T: Config> Pallet<T> {
     }
 
     fn unix_time() -> u128 {
-		T::UnixTime::now().as_millis()
-	}
+        T::UnixTime::now().as_millis()
+    }
 
     // ToDo
     fn challenge_value() -> Randomness {
@@ -292,7 +294,7 @@ impl<T: Config> Pallet<T> {
         raw_payload: Vec<u8>,
         uri: &URI,
         raw_owner_did: &Vec<u8>,
-        challenge: Vec<u8>
+        challenge: Vec<u8>,
     ) -> Result<T::AccountId, DispatchError> {
         let multi_sig = Self::raw_signature_to_multi_sig(&proof_type, &sig)?;
         let signer = Self::account_id32_from_raw_did(raw_owner_did.clone())?;
@@ -317,38 +319,53 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
-    fn check_challenge_value(
-        uri: &URI,
-        challenge: Vec<u8>
-    ) -> Result<(), DispatchError> {
+    fn check_challenge_value(uri: &URI, challenge: Vec<u8>) -> Result<(), DispatchError> {
         let cv = ChallengeValue::<T>::get(&uri).ok_or(Error::<T>::ChallengeValueMissing)?;
         ensure!(challenge == cv.to_vec(), Error::<T>::BadChallengeValue);
         Ok(())
     }
 
-    fn try_verify_urauth_doc_proof(urauth_doc: &URAuthDoc<T>, updated_at: u128, proof: Option<Proof>) -> Result<AccountId32, DispatchError> {
+    fn try_verify_urauth_doc_proof(
+        urauth_doc: &URAuthDoc<T>,
+        updated_at: u128,
+        proof: Option<Proof>,
+    ) -> Result<AccountId32, DispatchError> {
         let (owner_did, sig) = match proof.ok_or(Error::<T>::ProofMissing)? {
-            Proof::ProofV1 { did, proof } => (did, proof)
+            Proof::ProofV1 { did, proof } => (did, proof),
         };
-        let payload = URAuthSignedPayload::<T>::Update { urauth_doc: urauth_doc.clone(), updated_at, owner_did: owner_did.clone() };
+        let payload = URAuthSignedPayload::<T>::Update {
+            urauth_doc: urauth_doc.clone(),
+            updated_at,
+            owner_did: owner_did.clone(),
+        };
         let signer = Pallet::<T>::account_id32_from_raw_did(owner_did)?;
         if !payload.using_encoded(|m| sig.verify(m, &signer)) {
-            return Err(Error::<T>::BadProof.into())
+            return Err(Error::<T>::BadProof.into());
         }
 
         Ok(signer)
     }
 
-    fn try_store_updated_urauth_doc(urauth_doc: &URAuthDoc<T>, signer: AccountId32, updated_field: UpdateDocField<T::AccountId>) -> Result<(), DispatchError> {
+    fn try_store_updated_urauth_doc(
+        urauth_doc: &URAuthDoc<T>,
+        signer: AccountId32,
+        updated_field: UpdateDocField<T::AccountId>,
+    ) -> Result<(), DispatchError> {
         let multi_did = urauth_doc.get_multi_did();
-        let mut remaining = UpdateDocStatus::<T>::get(&urauth_doc.id).map_or(multi_did.threshold, |v| v);
+        let mut remaining =
+            UpdateDocStatus::<T>::get(&urauth_doc.id).map_or(multi_did.threshold, |v| v);
         let uri = urauth_doc.get_uri();
         let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
-        let did_weight = multi_did.get_did_weight(&account_id).ok_or(Error::<T>::AccountMissing)?;
+        let did_weight = multi_did
+            .get_did_weight(&account_id)
+            .ok_or(Error::<T>::AccountMissing)?;
         if did_weight >= remaining {
             URAuthTree::<T>::insert(&uri, urauth_doc.clone());
             UpdateDocStatus::<T>::remove(&urauth_doc.id);
-            Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated { updated_field, urauth_doc: urauth_doc.clone() })
+            Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated {
+                updated_field,
+                urauth_doc: urauth_doc.clone(),
+            })
         } else {
             remaining = remaining.saturating_sub(did_weight);
             UpdateDocStatus::<T>::insert(&urauth_doc.id, remaining);
@@ -414,15 +431,12 @@ impl<T: Config> Pallet<T> {
                     let mut proof = [0u8; 64];
                     hex::decode_to_slice(hex_proof, &mut proof as &mut [u8])
                         .map_err(|_| Error::<T>::ErrorDecodeHex)?;
-                    let mut challenge_bytes = [0u8; 32];
-                    hex::decode_to_slice(challenge.clone(), &mut challenge_bytes as &mut [u8])
-                        .map_err(|_| Error::<T>::ErrorDecodeHex)?;
                     let mut raw_payload: Vec<u8> = Default::default();
                     let raw_owner_did = owner_did.clone();
                     URAuthSignedPayload::<T>::Challenge {
                         uri: URI::new(uri.clone()),
                         owner_did,
-                        challenge,
+                        challenge: challenge.clone(),
                         timestamp,
                     }
                     .using_encoded(|m| raw_payload = m.to_vec());
@@ -433,7 +447,7 @@ impl<T: Config> Pallet<T> {
                         raw_payload,
                         URI::new(uri),
                         raw_owner_did,
-                        challenge_bytes.to_vec(),
+                        challenge,
                     ));
                 }
                 _ => return Err(Error::<T>::BadChallengeValue.into()),
