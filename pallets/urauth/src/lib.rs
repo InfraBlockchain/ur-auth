@@ -66,8 +66,8 @@ pub mod pallet {
     pub type ChallengeValue<T: Config> = StorageMap<_, Twox128, URI, Randomness>;
 
     #[pallet::storage]
-    pub type UpdateDocStatus<T: Config> =
-        StorageMap<_, Blake2_128Concat, DocId, RemainingThreshold>;
+    pub type URAuthDocUpdateStatus<T: Config> =
+        StorageMap<_, Blake2_128Concat, DocId, UpdateDocStatus>;
 
     #[pallet::storage]
     #[pallet::getter(fn oracle_members)]
@@ -104,7 +104,11 @@ pub mod pallet {
             updated_field: UpdateDocField<T::AccountId>,
             urauth_doc: URAuthDoc<T::AccountId>,
         },
-        URIRemoved {
+        UpdateOnHold {
+            urauth_doc: URAuthDoc<T::AccountId>,
+            update_doc_status: UpdateDocStatus
+        },
+        Removed {
             uri: URI,
         },
     }
@@ -123,6 +127,7 @@ pub mod pallet {
         ErrorDecodeAccountId,
         ErrorDecodeHex,
         NotOracleMember,
+        NotURAuthDocOwner,
         URINotVerfied,
         AccountMissing,
         OwnerMissing,
@@ -133,6 +138,7 @@ pub mod pallet {
         AlreadySubmitted,
         MaxOracleMembers,
         ErrorOnUpdateDoc,
+        UpdateInProgress,
     }
 
     #[pallet::call]
@@ -344,6 +350,10 @@ impl<T: Config> Pallet<T> {
         let (owner_did, sig) = match proof.clone().ok_or(Error::<T>::ProofMissing)? {
             Proof::ProofV1 { did, proof } => (did, proof),
         };
+        let owner_account = Self::account_id_from_source(AccountIdSource::DID(owner_did.clone()))?;
+        if !urauth_doc.multi_owner_did.is_owner(&owner_account) {
+            return Err(Error::<T>::NotURAuthDocOwner.into());
+        }
         let payload = URAuthSignedPayload::<T::AccountId>::Update {
             urauth_doc: urauth_doc.clone(),
             owner_did: owner_did.clone(),
@@ -370,22 +380,29 @@ impl<T: Config> Pallet<T> {
                 Error::<T>::ErrorOnUpdateDoc
             })?;
         let multi_did = urauth_doc.get_multi_did();
-        let mut remaining = UpdateDocStatus::<T>::get(&urauth_doc.id).map_or(threshold, |v| v);
+        let mut update_doc_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id).map_or(UpdateDocStatus::default(threshold), |uds| uds);
+        if update_doc_status.is_update_available() {
+            urauth_doc.remove_all_proofs();
+        }
         let uri = urauth_doc.get_uri();
         let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
         let did_weight = multi_did
             .get_did_weight(&account_id)
             .ok_or(Error::<T>::AccountMissing)?;
-        if did_weight >= remaining {
+        if did_weight >= update_doc_status.remaining_threshold {
             URAuthTree::<T>::insert(&uri, urauth_doc.clone());
-            UpdateDocStatus::<T>::remove(&urauth_doc.id);
+            URAuthDocUpdateStatus::<T>::remove(&urauth_doc.id);
             Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated {
                 updated_field,
                 urauth_doc: urauth_doc.clone(),
             })
         } else {
-            remaining = remaining.saturating_sub(did_weight);
-            UpdateDocStatus::<T>::insert(&urauth_doc.id, remaining);
+            update_doc_status.calc_remaining_threshold(did_weight);
+            URAuthDocUpdateStatus::<T>::insert(&urauth_doc.id, update_doc_status.clone());
+            Pallet::<T>::deposit_event(Event::<T>::UpdateOnHold {
+                urauth_doc: urauth_doc.clone(),
+                update_doc_status
+            })
         }
 
         Ok(())
@@ -417,7 +434,7 @@ impl<T: Config> Pallet<T> {
         URIVerificationInfo::<T>::remove(&uri);
         ChallengeValue::<T>::remove(&uri);
 
-        Self::deposit_event(Event::<T>::URIRemoved { uri })
+        Self::deposit_event(Event::<T>::Removed { uri })
     }
 
     /// Return

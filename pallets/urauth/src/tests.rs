@@ -599,27 +599,45 @@ fn update_urauth_doc_works() {
             })
         ));
         let mut urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
-        println!("Updated => {:?}", urauth_doc);
-
-        let update_field = UpdateDocField::Threshold(3);
-        assert!(urauth_doc.update_doc(&update_field, Some(2)).is_err());
-        let payload = create_urauth_doc_payload(urauth_doc.clone(), owner_did.clone());
+        println!("Updated Access Rule => {:?}", urauth_doc);
+        
+        let update_field = UpdateDocField::MultiDID(WeightedDID { did: Bob.to_account_id(), weight: 1 });
+        urauth_doc.update_doc(&update_field, Some(2)).unwrap();
+        let payload = create_urauth_doc_payload(urauth_doc, owner_did.clone());
         let proof = Alice.sign(&payload[..]);
-        assert_noop!(
+        assert_ok!(
             URAuth::update_urauth_doc(
-                RuntimeOrigin::signed(Alice.to_account_id()),
-                uri.clone(),
-                update_field,
-                2u128,
-                Some(Proof::ProofV1 {
-                    did: owner_did.as_bytes().to_vec(),
-                    proof: proof.into()
-                })
-            ),
-            Error::<Test>::ErrorOnUpdateDoc
+                RuntimeOrigin::signed(Alice.to_account_id()), 
+                uri.clone(), 
+                update_field, 
+                2u128, 
+                Some(
+                    Proof::ProofV1 { did: owner_did.as_bytes().to_vec(), proof: proof.into() }
+                )
+            )
         );
+
+        let mut urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
+        println!("Updated DIDs => {:?}", urauth_doc);
+
+        let update_field = UpdateDocField::Threshold(2);
+        urauth_doc.update_doc(&update_field, Some(3)).unwrap();
+        let payload = create_urauth_doc_payload(urauth_doc, owner_did.clone());
+        let proof = Alice.sign(&payload[..]);
+        assert_ok!(
+            URAuth::update_urauth_doc(
+                RuntimeOrigin::signed(Alice.to_account_id()), 
+                uri.clone(), 
+                update_field, 
+                3u128, 
+                Some(
+                    Proof::ProofV1 { did: owner_did.as_bytes().to_vec(), proof: proof.into() }
+                )
+            )
+        );
+
         let urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
-        println!("Updated => {:?}", urauth_doc);
+        println!("Updated DIDs => {:?}", urauth_doc);
     });
 }
 
