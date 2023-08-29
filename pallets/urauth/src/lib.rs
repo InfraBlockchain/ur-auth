@@ -66,8 +66,9 @@ pub mod pallet {
     pub type ChallengeValue<T: Config> = StorageMap<_, Twox128, URI, Randomness>;
 
     #[pallet::storage]
+    #[pallet::unbounded]
     pub type URAuthDocUpdateStatus<T: Config> =
-        StorageMap<_, Blake2_128Concat, DocId, UpdateDocStatus>;
+        StorageMap<_, Blake2_128Concat, DocId, UpdateDocStatus<T::AccountId>, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::getter(fn oracle_members)]
@@ -106,7 +107,7 @@ pub mod pallet {
         },
         UpdateOnHold {
             urauth_doc: URAuthDoc<T::AccountId>,
-            update_doc_status: UpdateDocStatus
+            update_doc_status: UpdateDocStatus<T::AccountId>
         },
         Removed {
             uri: URI,
@@ -259,8 +260,9 @@ pub mod pallet {
             let _ = ensure_signed(origin)?;
             let mut urauth_doc =
                 URAuthTree::<T>::get(&uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
+            let mut update_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id);
             let current_threshold = urauth_doc
-                .update_doc(&update_field, Some(updated_at))
+                .update_doc(&mut update_status, &update_field, Some(updated_at))
                 .map_err(|e| {
                     log::info!(" 🚨 Error on update urauth_doc {:?} 🚨", e);
                     Error::<T>::ErrorOnUpdateDoc
@@ -343,6 +345,38 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
+    fn handle_update_urauth_doc(
+        urauth_doc: &URAuthDoc<T::AccountId>, 
+        signer: AccountId32,
+        update_doc_status: &mut UpdateDocStatus<T::AccountId>, 
+        updated_field: UpdateDocField<T::AccountId>
+    ) -> Result<(), DispatchError>{
+        let multi_did = urauth_doc.get_multi_did();
+        let uri = urauth_doc.get_uri();
+        let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
+        let did_weight = multi_did
+            .get_did_weight(&account_id)
+            .ok_or(Error::<T>::AccountMissing)?;
+        let remaining_threshold = update_doc_status.remaining_threshold;
+        if did_weight >= remaining_threshold {
+            URAuthTree::<T>::insert(uri, urauth_doc.clone());
+            URAuthDocUpdateStatus::<T>::remove(urauth_doc.id);
+            Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated {
+                updated_field,
+                urauth_doc: urauth_doc.clone(),
+            })
+        } else {
+            update_doc_status.calc_remaining_threshold(did_weight);
+            update_doc_status.set_status(UpdateStatus::InProgress(updated_field));
+            URAuthDocUpdateStatus::<T>::insert(urauth_doc.id, update_doc_status.clone());
+            Pallet::<T>::deposit_event(Event::<T>::UpdateOnHold {
+                urauth_doc: urauth_doc.clone(),
+                update_doc_status: update_doc_status.clone()
+            })
+        }
+        Ok(())
+    }
+
     fn try_verify_urauth_doc_proof(
         urauth_doc: &URAuthDoc<T::AccountId>,
         proof: Option<Proof>,
@@ -373,37 +407,19 @@ impl<T: Config> Pallet<T> {
         proof: Proof,
         updated_field: UpdateDocField<T::AccountId>,
     ) -> Result<(), DispatchError> {
+        let mut update_doc_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id).map_or(UpdateDocStatus::default(threshold), |uds| uds);
+        if update_doc_status.is_update_available() {
+            urauth_doc.remove_all_proofs();
+        } else {
+            return Err(Error::<T>::UpdateInProgress.into())
+        }
         urauth_doc
             .update_doc(&UpdateDocField::Proof(proof), None)
             .map_err(|e| {
                 log::info!("🚨 Error on update urauth dodcument {:?} 🚨", e);
                 Error::<T>::ErrorOnUpdateDoc
             })?;
-        let multi_did = urauth_doc.get_multi_did();
-        let mut update_doc_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id).map_or(UpdateDocStatus::default(threshold), |uds| uds);
-        if update_doc_status.is_update_available() {
-            urauth_doc.remove_all_proofs();
-        }
-        let uri = urauth_doc.get_uri();
-        let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
-        let did_weight = multi_did
-            .get_did_weight(&account_id)
-            .ok_or(Error::<T>::AccountMissing)?;
-        if did_weight >= update_doc_status.remaining_threshold {
-            URAuthTree::<T>::insert(&uri, urauth_doc.clone());
-            URAuthDocUpdateStatus::<T>::remove(&urauth_doc.id);
-            Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated {
-                updated_field,
-                urauth_doc: urauth_doc.clone(),
-            })
-        } else {
-            update_doc_status.calc_remaining_threshold(did_weight);
-            URAuthDocUpdateStatus::<T>::insert(&urauth_doc.id, update_doc_status.clone());
-            Pallet::<T>::deposit_event(Event::<T>::UpdateOnHold {
-                urauth_doc: urauth_doc.clone(),
-                update_doc_status
-            })
-        }
+        Self::handle_update_urauth_doc(&urauth_doc, signer, &mut update_doc_status, updated_field)?;
 
         Ok(())
     }

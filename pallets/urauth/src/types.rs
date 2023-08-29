@@ -391,7 +391,7 @@ where
         self.multi_owner_did.clone()
     }
 
-    pub fn remove_all_proofs(&mut self) {
+    pub fn remove_all_prev_proofs(&mut self) {
         self.proofs = Some(Vec::new());
     }
 
@@ -403,13 +403,22 @@ where
 
     pub fn update_doc(
         &mut self,
+        update_status: &mut UpdateDocStatus<Account>,
         update_field: &UpdateDocField<Account>,
         updated_at: Option<u128>,
     ) -> Result<DIDWeight, URAuthDocUpdateError> {
+        match update_status.status {
+            UpdateStatus::Available => self.remove_all_prev_proofs(),
+            UpdateStatus::InProgress(field) => {
+                if &field != update_field {
+                    return Err(URAuthDocUpdateError::UpdateInProgress)
+                }
+            },
+        }
         if !matches!(update_field, UpdateDocField::Proof(_)) {
             if let Some(now) = updated_at {
                 if !self.check_valid_updated_at(now) {
-                    return Err(URAuthDocUpdateError::InvalidUpdate)
+                    return Err(URAuthDocUpdateError::InvalidUpdateAt)
                 }
                 self.updated_at = now;
             } else {
@@ -417,6 +426,7 @@ where
             }
         }
         let current_threshold = self.multi_owner_did.get_threshold();
+        update_status.set_remaining_threshold(current_threshold);
         match update_field.clone() {
             UpdateDocField::MultiDID(weighted_did) => {
                 self.multi_owner_did.add_owner(weighted_did);
@@ -466,24 +476,27 @@ pub enum UpdateDocField<Account> {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-pub struct UpdateDocStatus {
-    pub remaining_threshold: DIDWeight,
-    pub status: UpdateStatus
-}
-
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-pub enum UpdateStatus {
-    InProgress,
+pub enum UpdateStatus<Account> {
+    InProgress(UpdateDocField<Account>),
     Available
 }
 
-impl UpdateDocStatus {
-    pub fn default(threshold: DIDWeight) -> Self {
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub struct UpdateDocStatus<Account> {
+    pub remaining_threshold: DIDWeight,
+    pub status: UpdateStatus<Account>
+}
+
+impl<Account> Default for UpdateDocStatus<Account> {
+    fn default() -> Self {
         Self {
-            remaining_threshold: threshold,
+            remaining_threshold: 0u16,
             status: UpdateStatus::Available
         }
     }
+}
+
+impl<Account> UpdateDocStatus<Account> {
 
     pub fn is_update_available(&self) -> bool {
         matches!(self.status, UpdateStatus::Available)
@@ -493,7 +506,11 @@ impl UpdateDocStatus {
         self.remaining_threshold = self.remaining_threshold.saturating_sub(did_weight);
     }
 
-    pub fn set_status(&mut self, status: UpdateStatus) {
+    pub fn set_remaining_threshold(&mut self, threshold: DIDWeight) {
+        self.remaining_threshold = threshold;
+    }
+
+    pub fn set_status(&mut self, status: UpdateStatus<Account>) {
         self.status = status;
     }
 }
@@ -503,7 +520,8 @@ impl UpdateDocStatus {
 pub enum URAuthDocUpdateError {
     UpdatedAtMissing,
     ThreholdError,
-    InvalidUpdate,
+    InvalidUpdateAt,
+    UpdateInProgress
 }
 
 impl sp_runtime::traits::Printable for URAuthDocUpdateError {
@@ -512,7 +530,8 @@ impl sp_runtime::traits::Printable for URAuthDocUpdateError {
         match self {
             Self::UpdatedAtMissing => "UpdatedAtMissing".print(),
             Self::ThreholdError => "GreaterThanTotalWeight".print(),
-            Self::InvalidUpdate => "InvalidUpdatedAt".print()
+            Self::InvalidUpdateAt => "InvalidUpdatedAt".print(),
+            Self::UpdateInProgress => "UpdateInProgress".print()
         }
     }
 }
