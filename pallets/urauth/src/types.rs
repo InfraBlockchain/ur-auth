@@ -190,8 +190,20 @@ impl<Account: Encode> Encode for URAuthSignedPayload<Account> {
                     ..
                 } = urauth_doc;
 
-                (id, uri, created_at, updated_at, multi_owner_did, identity_info, content_metadata, copyright_info, access_rules, owner_did).encode()
-            },
+                (
+                    id,
+                    uri,
+                    created_at,
+                    updated_at,
+                    multi_owner_did,
+                    identity_info,
+                    content_metadata,
+                    copyright_info,
+                    access_rules,
+                    owner_did,
+                )
+                    .encode()
+            }
         };
         if raw_payload.len() > 256 {
             f(&sp_io::hashing::blake2_256(&raw_payload)[..])
@@ -247,10 +259,12 @@ impl<Account: PartialEq> MultiDID<Account> {
     }
 
     pub fn get_did_weight(self, who: &Account) -> Option<DIDWeight> {
-        if let Some(weighted_did) = self.dids.into_iter().find(|weighted_did| {
-            &weighted_did.did == who
-        }) {
-            return Some(weighted_did.weight)
+        if let Some(weighted_did) = self
+            .dids
+            .into_iter()
+            .find(|weighted_did| &weighted_did.did == who)
+        {
+            return Some(weighted_did.weight);
         }
         None
     }
@@ -288,10 +302,7 @@ pub enum CopyrightInfo {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum AccessRule {
-    AccessRuleV1 {
-        path: Vec<u8>,
-        rules: Vec<Rule>,
-    },
+    AccessRuleV1 { path: Vec<u8>, rules: Vec<Rule> },
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
@@ -299,22 +310,22 @@ pub struct UserAgent(pub Vec<u8>);
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct Rule {
-    pub user_agents: Vec<UserAgent>,                     
-    pub allow: Vec<(ContentType, Price)>, 
+    pub user_agents: Vec<UserAgent>,
+    pub allow: Vec<(ContentType, Price)>,
     pub disallow: Vec<ContentType>,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum PriceUnit {
     USDPerMb,
-    KRWPerMb
+    KRWPerMb,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct Price {
     pub price: u64,
     pub decimals: u8,
-    pub unit: PriceUnit
+    pub unit: PriceUnit,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
@@ -344,9 +355,9 @@ pub struct URAuthDoc<Account> {
     proofs: Option<Vec<Proof>>,
 }
 
-impl<Account> URAuthDoc<Account> 
+impl<Account> URAuthDoc<Account>
 where
-    Account: PartialEq + Clone
+    Account: PartialEq + Clone,
 {
     pub fn new(id: DocId, uri: URI, multi_owner_did: MultiDID<Account>, created_at: u128) -> Self {
         Self {
@@ -371,40 +382,47 @@ where
         self.multi_owner_did.clone()
     }
 
-    pub fn update_doc(&mut self, update_field: &UpdateDocField<Account>, updated_at: Option<u128>) -> Result<DIDWeight, URAuthDocUpdateError> {
+    pub fn update_doc(
+        &mut self,
+        update_field: &UpdateDocField<Account>,
+        updated_at: Option<u128>,
+    ) -> Result<DIDWeight, URAuthDocUpdateError> {
         if !matches!(update_field, UpdateDocField::Proof(_)) {
             if let Some(at) = updated_at {
                 self.updated_at = at;
             } else {
-                return Err(URAuthDocUpdateError::UpdatedAtMissing)
+                return Err(URAuthDocUpdateError::UpdatedAtMissing);
             }
         }
         let current_threshold = self.multi_owner_did.get_threshold();
         match update_field.clone() {
             UpdateDocField::MultiDID(weighted_did) => {
                 self.multi_owner_did.add_owner(weighted_did);
-            },
+            }
             UpdateDocField::Threshold(new) => {
                 let total_weight = self.multi_owner_did.total_weight();
                 if total_weight < new {
-                    return Err(URAuthDocUpdateError::ThreholdError)
+                    return Err(URAuthDocUpdateError::ThreholdError);
                 }
                 self.multi_owner_did.set_threshold(new);
-            },
-            UpdateDocField::IdentityInfo(identity_info) => { 
+            }
+            UpdateDocField::IdentityInfo(identity_info) => {
                 self.identity_info = identity_info;
-            },
-            UpdateDocField::ContentMetadata(content_metadata) => { 
+            }
+            UpdateDocField::ContentMetadata(content_metadata) => {
                 self.content_metadata = content_metadata;
-            },
-            UpdateDocField::CopyrightInfo(copyright_info) => { 
+            }
+            UpdateDocField::CopyrightInfo(copyright_info) => {
                 self.copyright_info = copyright_info;
-            },
+            }
             UpdateDocField::AccessRules(access_rules) => {
                 self.access_rules = access_rules;
-            },
+            }
             UpdateDocField::Proof(proof) => {
-                let mut updated = self.proofs.take().map_or(Default::default(), |proofs| proofs);
+                let mut updated = self
+                    .proofs
+                    .take()
+                    .map_or(Default::default(), |proofs| proofs);
                 updated.push(proof);
                 self.proofs = Some(updated);
             }
@@ -428,7 +446,7 @@ pub enum UpdateDocField<Account> {
 /// Errors that may happen on offence reports.
 #[derive(PartialEq, sp_runtime::RuntimeDebug)]
 pub enum URAuthDocUpdateError {
-	UpdatedAtMissing,
+    UpdatedAtMissing,
     ThreholdError,
 }
 

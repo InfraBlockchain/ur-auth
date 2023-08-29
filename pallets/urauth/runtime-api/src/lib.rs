@@ -3,10 +3,10 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::Codec;
-use pallet_urauth::{UpdateDocField, URAuthDoc, URI};
+use pallet_urauth::{URAuthDoc, UpdateDocField, URI};
 
 sp_api::decl_runtime_apis! {
-    pub trait URAuthApi<Account> 
+    pub trait URAuthApi<Account>
     where
         Account: Codec
     {

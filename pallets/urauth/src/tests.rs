@@ -67,10 +67,10 @@ impl frame_system::Config for Test {
 }
 
 impl pallet_timestamp::Config for Test {
-	type Moment = u64;
-	type OnTimestampSet = ();
-	type MinimumPeriod = frame_support::traits::ConstU64<5>;
-	type WeightInfo = ();
+    type Moment = u64;
+    type OnTimestampSet = ();
+    type MinimumPeriod = frame_support::traits::ConstU64<5>;
+    type WeightInfo = ();
 }
 
 parameter_types! {
@@ -546,48 +546,58 @@ fn update_urauth_doc_works() {
         ));
         let mut urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
         println!("{:?}", urauth_doc);
-        let update_field = UpdateDocField::AccessRules(
-            Some(
-                vec![
-                    AccessRule::AccessRuleV1 { 
-                        path: "/raf".as_bytes().to_vec(), 
-                        rules: vec![
-                            Rule {
-                                user_agents: vec![UserAgent("GPTBOT".as_bytes().to_vec())],
-                                allow: vec![
-                                    (
-                                        ContentType::Image,
-                                        Price {
-                                            price: 100,
-                                            decimals: 4,
-                                            unit: PriceUnit::USDPerMb
-                                        }
-                                    )
-                                ], 
-                                disallow: vec![
-                                    ContentType::Video,
-                                    ContentType::Code,
-                                ]
-                            }
-                        ] 
-                    }
-                ]
-            )
-        );
+        let update_field = UpdateDocField::AccessRules(Some(vec![AccessRule::AccessRuleV1 {
+            path: "/raf".as_bytes().to_vec(),
+            rules: vec![Rule {
+                user_agents: vec![UserAgent("GPTBOT".as_bytes().to_vec())],
+                allow: vec![(
+                    ContentType::Image,
+                    Price {
+                        price: 100,
+                        decimals: 4,
+                        unit: PriceUnit::USDPerMb,
+                    },
+                )],
+                disallow: vec![ContentType::Video, ContentType::Code],
+            }],
+        }]));
         urauth_doc.update_doc(&update_field, Some(1u128)).unwrap();
         let URAuthDoc {
-            id, uri, created_at, updated_at, multi_owner_did, identity_info, content_metadata, copyright_info, access_rules, ..
+            id,
+            uri,
+            created_at,
+            updated_at,
+            multi_owner_did,
+            identity_info,
+            content_metadata,
+            copyright_info,
+            access_rules,
+            ..
         } = urauth_doc.clone();
-        let payload = (id, uri.clone(), created_at, updated_at, multi_owner_did, identity_info, content_metadata, copyright_info, access_rules, owner_did.as_bytes().to_vec()).encode();
+        let payload = (
+            id,
+            uri.clone(),
+            created_at,
+            updated_at,
+            multi_owner_did,
+            identity_info,
+            content_metadata,
+            copyright_info,
+            access_rules,
+            owner_did.as_bytes().to_vec(),
+        )
+            .encode();
         let proof = Alice.sign(&payload[..]);
         assert_ok!(URAuth::update_urauth_doc(
-                RuntimeOrigin::signed(Alice.to_account_id()), 
-                uri.clone(), 
-                update_field, 
-                1u128,
-                Some(Proof::ProofV1 { did: owner_did.as_bytes().to_vec(), proof: proof.into() })
-            )
-        );
+            RuntimeOrigin::signed(Alice.to_account_id()),
+            uri.clone(),
+            update_field,
+            1u128,
+            Some(Proof::ProofV1 {
+                did: owner_did.as_bytes().to_vec(),
+                proof: proof.into()
+            })
+        ));
         let mut urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
         println!("Updated => {:?}", urauth_doc);
 
@@ -595,12 +605,16 @@ fn update_urauth_doc_works() {
         assert!(urauth_doc.update_doc(&update_field, Some(2)).is_err());
         let payload = create_urauth_doc_payload(urauth_doc.clone(), owner_did.clone());
         let proof = Alice.sign(&payload[..]);
-        assert_noop!(URAuth::update_urauth_doc(
-            RuntimeOrigin::signed(Alice.to_account_id()), 
-                uri.clone(), 
-                update_field, 
+        assert_noop!(
+            URAuth::update_urauth_doc(
+                RuntimeOrigin::signed(Alice.to_account_id()),
+                uri.clone(),
+                update_field,
                 2u128,
-                Some(Proof::ProofV1 { did: owner_did.as_bytes().to_vec(), proof: proof.into() })
+                Some(Proof::ProofV1 {
+                    did: owner_did.as_bytes().to_vec(),
+                    proof: proof.into()
+                })
             ),
             Error::<Test>::ErrorOnUpdateDoc
         );
@@ -611,7 +625,28 @@ fn update_urauth_doc_works() {
 
 fn create_urauth_doc_payload(urauth_doc: URAuthDoc<MockAccountId>, owner_did: String) -> Vec<u8> {
     let URAuthDoc {
-        id, uri, created_at, updated_at, multi_owner_did, identity_info, content_metadata, copyright_info, access_rules, ..
+        id,
+        uri,
+        created_at,
+        updated_at,
+        multi_owner_did,
+        identity_info,
+        content_metadata,
+        copyright_info,
+        access_rules,
+        ..
     } = urauth_doc.clone();
-    (id, uri.clone(), created_at, updated_at, multi_owner_did, identity_info, content_metadata, copyright_info, access_rules, owner_did.as_bytes().to_vec()).encode()
+    (
+        id,
+        uri.clone(),
+        created_at,
+        updated_at,
+        multi_owner_did,
+        identity_info,
+        content_metadata,
+        copyright_info,
+        access_rules,
+        owner_did.as_bytes().to_vec(),
+    )
+        .encode()
 }
