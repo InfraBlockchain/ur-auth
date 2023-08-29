@@ -159,7 +159,6 @@ pub enum URAuthSignedPayload<T: Config> {
     },
     Update {
         urauth_doc: URAuthDoc<T>,
-        updated_at: u128,
         owner_did: OwnerDID,
     },
 }
@@ -176,9 +175,23 @@ impl<T: Config> Encode for URAuthSignedPayload<T> {
             } => (uri, owner_did, challenge, timestamp).encode(),
             URAuthSignedPayload::Update {
                 urauth_doc,
-                updated_at,
                 owner_did,
-            } => (urauth_doc, updated_at, owner_did).encode(),
+            } => {
+                let URAuthDoc {
+                    id,
+                    uri,
+                    created_at,
+                    updated_at,
+                    multi_owner_did,
+                    identity_info,
+                    content_metadata,
+                    copyright_info,
+                    access_rules,
+                    ..
+                } = urauth_doc;
+
+                (id, uri, created_at, updated_at, multi_owner_did, identity_info, content_metadata, copyright_info, access_rules, owner_did).encode()
+            },
         };
         if raw_payload.len() > 256 {
             f(&sp_io::hashing::blake2_256(&raw_payload)[..])
@@ -266,13 +279,13 @@ pub enum AccessRule {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct UserAgent(Vec<u8>);
+pub struct UserAgent(pub Vec<u8>);
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct Rule {
-    user_agents: Vec<UserAgent>,                     
-    allow: Vec<(ContentType, Price)>, 
-    disallow: Vec<ContentType>,
+    pub user_agents: Vec<UserAgent>,                     
+    pub allow: Vec<(ContentType, Price)>, 
+    pub disallow: Vec<ContentType>,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
@@ -306,13 +319,13 @@ pub enum Proof {
 pub struct URAuthDoc<T: Config> {
     pub id: DocId,
     pub uri: URI,
-    created_at: u128,
-    updated_at: u128,
-    multi_owner_did: MultiDID<T::AccountId>,
-    identity_info: Option<Vec<Vec<u8>>>,
-    content_metadata: Option<ContentMetadata>,
-    copyright_info: Option<CopyrightInfo>,
-    access_rules: Option<Vec<AccessRule>>,
+    pub created_at: u128,
+    pub updated_at: u128,
+    pub multi_owner_did: MultiDID<T::AccountId>,
+    pub identity_info: Option<Vec<Vec<u8>>>,
+    pub content_metadata: Option<ContentMetadata>,
+    pub copyright_info: Option<CopyrightInfo>,
+    pub access_rules: Option<Vec<AccessRule>>,
     proofs: Option<Vec<Proof>>,
 }
 
@@ -340,7 +353,11 @@ impl<T: Config> URAuthDoc<T> {
         self.multi_owner_did.clone()
     }
 
-    pub fn update_doc(&mut self, update_field: &UpdateDocField<T::AccountId>) {
+    pub fn update_doc(&mut self, update_field: &UpdateDocField<T::AccountId>, updated_at: Option<u128>) -> Result<(), DispatchError>{
+        if !matches!(update_field, UpdateDocField::Proof(_)) {
+            let at = updated_at.ok_or(Error::<T>::UpdatedAtMissing)?;
+            self.updated_at = at;
+        }
         match update_field.clone() {
             UpdateDocField::MultiDID(weighted_did) => {
                 self.multi_owner_did.add_owner(weighted_did);
@@ -361,8 +378,16 @@ impl<T: Config> URAuthDoc<T> {
             UpdateDocField::AccessRules(access_rules) => {
                 self.access_rules = access_rules;
                 self
+            },
+            UpdateDocField::Proof(proof) => {
+                let mut updated = self.proofs.take().map_or(Default::default(), |proofs| proofs);
+                updated.push(proof);
+                self.proofs = Some(updated);
+                self
             }
         };
+
+        Ok(())
     }
 }
 
@@ -372,5 +397,6 @@ pub enum UpdateDocField<Account> {
     IdentityInfo(Option<Vec<Vec<u8>>>),
     ContentMetadata(Option<ContentMetadata>),
     CopyrightInfo(Option<CopyrightInfo>),
-    AccessRules(Option<Vec<AccessRule>>)
+    AccessRules(Option<Vec<AccessRule>>),
+    Proof(Proof),
 }

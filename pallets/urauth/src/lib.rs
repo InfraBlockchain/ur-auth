@@ -128,6 +128,7 @@ pub mod pallet {
         OwnerMissing,
         ProofMissing,
         ChallengeValueMissing,
+        UpdatedAtMissing,
         ChallengeValueNotProvided,
         URAuthTreeNotRegistered,
         AlreadySubmitted,
@@ -252,9 +253,9 @@ pub mod pallet {
             let _ = ensure_signed(origin)?;
             let mut urauth_doc =
                 URAuthTree::<T>::get(&uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
-            urauth_doc.update_doc(&update_field);
-            let owner = Self::try_verify_urauth_doc_proof(&urauth_doc, updated_at, proof)?;
-            Self::try_store_updated_urauth_doc(&urauth_doc, owner, update_field)?;
+            urauth_doc.update_doc(&update_field, Some(updated_at))?;
+            let (owner, proof) = Self::try_verify_urauth_doc_proof(&urauth_doc, proof)?;
+            Self::try_store_updated_urauth_doc(&mut urauth_doc, owner, proof, update_field)?;
 
             Ok(())
         }
@@ -327,15 +328,13 @@ impl<T: Config> Pallet<T> {
 
     fn try_verify_urauth_doc_proof(
         urauth_doc: &URAuthDoc<T>,
-        updated_at: u128,
         proof: Option<Proof>,
-    ) -> Result<AccountId32, DispatchError> {
-        let (owner_did, sig) = match proof.ok_or(Error::<T>::ProofMissing)? {
+    ) -> Result<(AccountId32, Proof), DispatchError> {
+        let (owner_did, sig) = match proof.clone().ok_or(Error::<T>::ProofMissing)? {
             Proof::ProofV1 { did, proof } => (did, proof),
         };
         let payload = URAuthSignedPayload::<T>::Update {
             urauth_doc: urauth_doc.clone(),
-            updated_at,
             owner_did: owner_did.clone(),
         };
         let signer = Pallet::<T>::account_id32_from_raw_did(owner_did)?;
@@ -343,14 +342,16 @@ impl<T: Config> Pallet<T> {
             return Err(Error::<T>::BadProof.into());
         }
 
-        Ok(signer)
+        Ok((signer, proof.expect("Already checked!")))
     }
 
     fn try_store_updated_urauth_doc(
-        urauth_doc: &URAuthDoc<T>,
+        urauth_doc: &mut URAuthDoc<T>,
         signer: AccountId32,
+        proof: Proof,
         updated_field: UpdateDocField<T::AccountId>,
     ) -> Result<(), DispatchError> {
+        urauth_doc.update_doc(&UpdateDocField::Proof(proof), None)?;
         let multi_did = urauth_doc.get_multi_did();
         let mut remaining =
             UpdateDocStatus::<T>::get(&urauth_doc.id).map_or(multi_did.threshold, |v| v);

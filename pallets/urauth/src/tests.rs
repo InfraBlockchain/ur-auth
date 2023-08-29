@@ -283,12 +283,6 @@ fn urauth_request_register_domain_owner_works() {
     let uri = URI::new("www.website1.com".as_bytes().to_vec());
     let owner_did = generate_did(ALICE_SS58);
     let challenge_value = Some(Randomness::default());
-    println!("{:?}", challenge_value.unwrap());
-    let mut bytes = [0u8; 64];
-    let encoded = hex::encode(challenge_value.unwrap());
-    hex::encode_to_slice(challenge_value.unwrap(), &mut bytes).unwrap();
-    let decoded = hex::decode(bytes).unwrap();
-    println!("Decoded => {:?}", decoded.len());
     let signer = MultiSigner::Sr25519(Alice.public());
     let signature = create_signature(
         Alice,
@@ -299,7 +293,7 @@ fn urauth_request_register_domain_owner_works() {
             RuntimeOrigin::signed(Alice.to_account_id()),
             uri.clone(),
             owner_did.as_bytes().to_vec(),
-            challenge_value,
+            challenge_value.clone(),
             signer.clone(),
             signature.clone()
         ));
@@ -364,7 +358,7 @@ fn urauth_request_register_domain_owner_works() {
 fn verify_challenge_works() {
     let uri = URI::new("www.website1.com".into());
     let owner_did = generate_did(ALICE_SS58);
-    let challenge_value = "[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]";
+    let challenge_value = "E40Bzg8kAvOIjswwxc29WaQCHuOKwoZC";
     let timestamp = "2023-07-28T10:17:21Z";
     let msg = (
         uri.clone(),
@@ -387,7 +381,7 @@ fn verify_challenge_works() {
         "Sr25519Signature2020".into(),
         hex::encode(sig).clone(),
     );
-
+    println!("{:?}", json_str);
     new_test_ext().execute_with(|| {
         assert_ok!(URAuth::add_oracle_member(
             RuntimeOrigin::root(),
@@ -398,7 +392,7 @@ fn verify_challenge_works() {
             RuntimeOrigin::signed(Alice.to_account_id()),
             uri.clone(),
             owner_did.as_bytes().to_vec(),
-            Some(Randomness::default()),
+            Some(challenge_value.as_bytes().to_vec()[..].try_into().unwrap()),
             MultiSigner::Sr25519(Alice.public()),
             request_signature
         ));
@@ -506,13 +500,95 @@ fn fixed_str_works() {
 
 #[test]
 fn update_urauth_doc_works() {
-    let mut urauth_doc = URAuthDoc::<Test>::new(
-        Default::default(), 
-        URI::new("website1.com".into()), 
-        MultiDID::new(Alice.to_account_id(), 1), 0u128
+    let uri = URI::new("www.website1.com".into());
+    let owner_did = generate_did(ALICE_SS58);
+    let challenge_value = "E40Bzg8kAvOIjswwxc29WaQCHuOKwoZC";
+    let timestamp = "2023-07-28T10:17:21Z";
+    let msg = (
+        uri.clone(),
+        owner_did.as_bytes().to_vec(),
+        challenge_value.as_bytes().to_vec(),
+        timestamp.as_bytes().to_vec(),
+    )
+        .encode();
+    let sig = Alice.sign(&msg);
+    let request_signature = create_signature(
+        Alice,
+        SigType::URI("www.website1.com".into(), generate_did(ALICE_SS58)),
     );
-    urauth_doc.update_doc(
-        &UpdateDocField::MultiDID(WeightedDID { did: Bob.to_account_id(), weight: 1 })
+
+    let json_str = generate_json(
+        "www.website1.com".into(),
+        owner_did.clone(),
+        challenge_value.into(),
+        timestamp.into(),
+        "Sr25519Signature2020".into(),
+        hex::encode(sig).clone(),
     );
-    println!("{:?}", urauth_doc);
+    new_test_ext().execute_with(|| {
+        assert_ok!(URAuth::add_oracle_member(
+            RuntimeOrigin::root(),
+            Alice.to_account_id()
+        ));
+
+        assert_ok!(URAuth::urauth_request_register_domain_owner(
+            RuntimeOrigin::signed(Alice.to_account_id()),
+            uri.clone(),
+            owner_did.as_bytes().to_vec(),
+            Some(challenge_value.as_bytes().to_vec()[..].try_into().unwrap()),
+            MultiSigner::Sr25519(Alice.public()),
+            request_signature
+        ));
+
+        assert_ok!(URAuth::verify_challenge(
+            RuntimeOrigin::signed(Alice.to_account_id()),
+            json_str.as_bytes().to_vec()
+        ));
+        let mut urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
+        println!("{:?}", urauth_doc);
+        let update_field = UpdateDocField::AccessRules(
+            Some(
+                vec![
+                    AccessRule::AccessRuleV1 { 
+                        path: "/raf".as_bytes().to_vec(), 
+                        rules: vec![
+                            Rule {
+                                user_agents: vec![UserAgent("GPTBOT".as_bytes().to_vec())],
+                                allow: vec![
+                                    (
+                                        ContentType::Image,
+                                        Price {
+                                            price: 100,
+                                            decimals: 4,
+                                            unit: PriceUnit::USDPerMb
+                                        }
+                                    )
+                                ], 
+                                disallow: vec![
+                                    ContentType::Video,
+                                    ContentType::Code,
+                                ]
+                            }
+                        ] 
+                    }
+                ]
+            )
+        );
+        urauth_doc.update_doc(&update_field, Some(1u128)).unwrap();
+        let URAuthDoc {
+            id, uri, created_at, updated_at, multi_owner_did, identity_info, content_metadata, copyright_info, access_rules, ..
+        } = urauth_doc.clone();
+        let payload = (id, uri.clone(), created_at, updated_at, multi_owner_did, identity_info, content_metadata, copyright_info, access_rules, owner_did.as_bytes().to_vec()).encode();
+        let proof = Alice.sign(&payload[..]);
+        assert_ok!(URAuth::update_urauth_doc(
+                RuntimeOrigin::signed(Alice.to_account_id()), 
+                uri.clone(), 
+                update_field, 
+                1u128, 
+                Some(Proof::ProofV1 { did: owner_did.as_bytes().to_vec(), proof: proof.into() })
+            )
+        );
+        let urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
+        println!("Updated => {:?}", urauth_doc);
+    });
 }
