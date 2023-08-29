@@ -7366,6 +7366,7 @@ dependencies = [
  "frame-system",
  "hex",
  "lite-json",
+ "log",
  "nuuid",
  "pallet-timestamp",
  "parity-scale-codec",
@@ -7377,6 +7378,15 @@ dependencies = [
  "sp-keyring",
  "sp-runtime",
  "sp-std",
+]
+
+[[package]]
+name = "pallet-urauth-runtime-api"
+version = "0.1.0"
+dependencies = [
+ "pallet-urauth",
+ "parity-scale-codec",
+ "sp-api",
 ]
 
 [[package]]
@@ -7586,6 +7596,7 @@ dependencies = [
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
  "pallet-urauth",
+ "pallet-urauth-runtime-api",
  "pallet-xcm",
  "parachain-info",
  "parachains-common",

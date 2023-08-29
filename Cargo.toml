@@ -2,6 +2,7 @@
 members = [
 	"node",
 	"pallets/*",
+	"pallets/urauth/runtime-api",
 	"runtime",
 ]
 

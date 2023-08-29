@@ -584,11 +584,34 @@ fn update_urauth_doc_works() {
                 RuntimeOrigin::signed(Alice.to_account_id()), 
                 uri.clone(), 
                 update_field, 
-                1u128, 
+                1u128,
                 Some(Proof::ProofV1 { did: owner_did.as_bytes().to_vec(), proof: proof.into() })
             )
+        );
+        let mut urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
+        println!("Updated => {:?}", urauth_doc);
+
+        let update_field = UpdateDocField::Threshold(3);
+        assert!(urauth_doc.update_doc(&update_field, Some(2)).is_err());
+        let payload = create_urauth_doc_payload(urauth_doc.clone(), owner_did.clone());
+        let proof = Alice.sign(&payload[..]);
+        assert_noop!(URAuth::update_urauth_doc(
+            RuntimeOrigin::signed(Alice.to_account_id()), 
+                uri.clone(), 
+                update_field, 
+                2u128,
+                Some(Proof::ProofV1 { did: owner_did.as_bytes().to_vec(), proof: proof.into() })
+            ),
+            Error::<Test>::ErrorOnUpdateDoc
         );
         let urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
         println!("Updated => {:?}", urauth_doc);
     });
+}
+
+fn create_urauth_doc_payload(urauth_doc: URAuthDoc<MockAccountId>, owner_did: String) -> Vec<u8> {
+    let URAuthDoc {
+        id, uri, created_at, updated_at, multi_owner_did, identity_info, content_metadata, copyright_info, access_rules, ..
+    } = urauth_doc.clone();
+    (id, uri.clone(), created_at, updated_at, multi_owner_did, identity_info, content_metadata, copyright_info, access_rules, owner_did.as_bytes().to_vec()).encode()
 }

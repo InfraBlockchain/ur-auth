@@ -49,7 +49,7 @@ pub mod pallet {
 
     #[pallet::storage]
     #[pallet::unbounded]
-    pub type URAuthTree<T: Config> = StorageMap<_, Twox128, URI, URAuthDoc<T>>;
+    pub type URAuthTree<T: Config> = StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId>>;
 
     #[pallet::storage]
     #[pallet::unbounded]
@@ -90,7 +90,7 @@ pub mod pallet {
         URAuthTreeRegistered {
             count: URAuthDocCount,
             uri: URI,
-            urauth_doc: URAuthDoc<T>,
+            urauth_doc: URAuthDoc<T::AccountId>,
         },
         VerificationSubmitted {
             member: T::AccountId,
@@ -102,7 +102,7 @@ pub mod pallet {
         },
         URAuthDocUpdated {
             updated_field: UpdateDocField<T::AccountId>,
-            urauth_doc: URAuthDoc<T>,
+            urauth_doc: URAuthDoc<T::AccountId>,
         },
         URIRemoved {
             uri: URI,
@@ -128,11 +128,11 @@ pub mod pallet {
         OwnerMissing,
         ProofMissing,
         ChallengeValueMissing,
-        UpdatedAtMissing,
         ChallengeValueNotProvided,
         URAuthTreeNotRegistered,
         AlreadySubmitted,
         MaxOracleMembers,
+        ErrorOnUpdateDoc
     }
 
     #[pallet::call]
@@ -149,7 +149,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
 
-            let urauth_signed_payload = URAuthSignedPayload::<T>::Request {
+            let urauth_signed_payload = URAuthSignedPayload::<T::AccountId>::Request {
                 uri: uri.clone(),
                 owner_did: owner_did.clone(),
             };
@@ -216,7 +216,7 @@ pub mod pallet {
                 VerificationResult::Complete => {
                     let mut count = Counter::<T>::get();
                     count = count.checked_add(1).ok_or(Error::<T>::Overflow)?;
-                    let urauth_doc: URAuthDoc<T> = URAuthDoc::new(
+                    let urauth_doc: URAuthDoc<T::AccountId> = URAuthDoc::new(
                         Self::doc_id(count),
                         uri.clone(),
                         MultiDID::new(owner, 1),
@@ -253,9 +253,14 @@ pub mod pallet {
             let _ = ensure_signed(origin)?;
             let mut urauth_doc =
                 URAuthTree::<T>::get(&uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
-            urauth_doc.update_doc(&update_field, Some(updated_at))?;
+            let current_threshold = urauth_doc.update_doc(&update_field, Some(updated_at)).map_err(|e| {
+                log::info!(
+                    " 🚨 Error on update urauth_doc {:?} 🚨", e
+                );
+                Error::<T>::ErrorOnUpdateDoc
+            })?;
             let (owner, proof) = Self::try_verify_urauth_doc_proof(&urauth_doc, proof)?;
-            Self::try_store_updated_urauth_doc(&mut urauth_doc, owner, proof, update_field)?;
+            Self::try_store_updated_urauth_doc(&mut urauth_doc, current_threshold, owner, proof, update_field)?;
 
             Ok(())
         }
@@ -327,13 +332,13 @@ impl<T: Config> Pallet<T> {
     }
 
     fn try_verify_urauth_doc_proof(
-        urauth_doc: &URAuthDoc<T>,
+        urauth_doc: &URAuthDoc<T::AccountId>,
         proof: Option<Proof>,
     ) -> Result<(AccountId32, Proof), DispatchError> {
         let (owner_did, sig) = match proof.clone().ok_or(Error::<T>::ProofMissing)? {
             Proof::ProofV1 { did, proof } => (did, proof),
         };
-        let payload = URAuthSignedPayload::<T>::Update {
+        let payload = URAuthSignedPayload::<T::AccountId>::Update {
             urauth_doc: urauth_doc.clone(),
             owner_did: owner_did.clone(),
         };
@@ -346,15 +351,21 @@ impl<T: Config> Pallet<T> {
     }
 
     fn try_store_updated_urauth_doc(
-        urauth_doc: &mut URAuthDoc<T>,
+        urauth_doc: &mut URAuthDoc<T::AccountId>,
+        threshold: DIDWeight,
         signer: AccountId32,
         proof: Proof,
         updated_field: UpdateDocField<T::AccountId>,
     ) -> Result<(), DispatchError> {
-        urauth_doc.update_doc(&UpdateDocField::Proof(proof), None)?;
+        urauth_doc.update_doc(&UpdateDocField::Proof(proof), None).map_err(|e| {
+            log::info!(
+                "🚨 Error on update urauth dodcument {:?} 🚨", e
+            );
+            Error::<T>::ErrorOnUpdateDoc
+        })?;
         let multi_did = urauth_doc.get_multi_did();
         let mut remaining =
-            UpdateDocStatus::<T>::get(&urauth_doc.id).map_or(multi_did.threshold, |v| v);
+            UpdateDocStatus::<T>::get(&urauth_doc.id).map_or(threshold, |v| v);
         let uri = urauth_doc.get_uri();
         let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
         let did_weight = multi_did
@@ -434,7 +445,7 @@ impl<T: Config> Pallet<T> {
                         .map_err(|_| Error::<T>::ErrorDecodeHex)?;
                     let mut raw_payload: Vec<u8> = Default::default();
                     let raw_owner_did = owner_did.clone();
-                    URAuthSignedPayload::<T>::Challenge {
+                    URAuthSignedPayload::<T::AccountId>::Challenge {
                         uri: URI::new(uri.clone()),
                         owner_did,
                         challenge: challenge.clone(),
@@ -517,5 +528,18 @@ impl<T: Config> Pallet<T> {
         raw_account_id.copy_from_slice(buf);
 
         Ok(raw_account_id.into())
+    }
+}
+
+impl<T: Config> Pallet<T> {
+    pub fn get_updated_doc(uri: URI, update_field: UpdateDocField<T::AccountId>, updated_at: Option<u128>) -> Option<URAuthDoc<T::AccountId>> {
+        if let Some(mut urauth_doc) = URAuthTree::<T>::get(&uri) {
+            match urauth_doc.update_doc(&update_field, updated_at) {
+                Ok(_) => Some(urauth_doc.clone()),
+                Err(_) => None
+            }
+        } else {
+            None
+        }
     }
 }

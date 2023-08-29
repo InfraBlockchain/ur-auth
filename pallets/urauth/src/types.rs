@@ -145,8 +145,8 @@ impl ChallengeValueConfig {
     }
 }
 
-#[derive(Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub enum URAuthSignedPayload<T: Config> {
+#[derive(Decode, Clone, PartialEq, Eq)]
+pub enum URAuthSignedPayload<Account> {
     Request {
         uri: URI,
         owner_did: OwnerDID,
@@ -158,12 +158,12 @@ pub enum URAuthSignedPayload<T: Config> {
         timestamp: Vec<u8>,
     },
     Update {
-        urauth_doc: URAuthDoc<T>,
+        urauth_doc: URAuthDoc<Account>,
         owner_did: OwnerDID,
     },
 }
 
-impl<T: Config> Encode for URAuthSignedPayload<T> {
+impl<Account: Encode> Encode for URAuthSignedPayload<Account> {
     fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
         let raw_payload = match self {
             URAuthSignedPayload::Request { uri, owner_did } => (uri, owner_did).encode(),
@@ -219,7 +219,7 @@ impl<Account> WeightedDID<Account> {
     }
 }
 // Multisig-enabled DID
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Debug, Eq, TypeInfo)]
 pub struct MultiDID<Account> {
     pub dids: Vec<WeightedDID<Account>>,
     // Sum(weight) >= threshold
@@ -234,6 +234,14 @@ impl<Account: PartialEq> MultiDID<Account> {
         }
     }
 
+    pub fn get_threshold(&self) -> DIDWeight {
+        self.threshold
+    }
+
+    pub fn set_threshold(&mut self, new: DIDWeight) {
+        self.threshold = new;
+    }
+
     pub fn add_owner(&mut self, weighted_did: WeightedDID<Account>) {
         self.dids.push(weighted_did);
     }
@@ -245,6 +253,14 @@ impl<Account: PartialEq> MultiDID<Account> {
             return Some(weighted_did.weight)
         }
         None
+    }
+
+    pub fn total_weight(&self) -> DIDWeight {
+        let mut total = 0;
+        for did in self.dids.iter() {
+            total += did.weight;
+        }
+        total
     }
 }
 
@@ -314,14 +330,13 @@ pub enum Proof {
     ProofV1 { did: Vec<u8>, proof: MultiSignature },
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebugNoBound, TypeInfo)]
-#[scale_info(skip_type_params(T))]
-pub struct URAuthDoc<T: Config> {
+#[derive(Encode, Decode, Clone, PartialEq, Debug, Eq, TypeInfo)]
+pub struct URAuthDoc<Account> {
     pub id: DocId,
     pub uri: URI,
     pub created_at: u128,
     pub updated_at: u128,
-    pub multi_owner_did: MultiDID<T::AccountId>,
+    pub multi_owner_did: MultiDID<Account>,
     pub identity_info: Option<Vec<Vec<u8>>>,
     pub content_metadata: Option<ContentMetadata>,
     pub copyright_info: Option<CopyrightInfo>,
@@ -329,8 +344,11 @@ pub struct URAuthDoc<T: Config> {
     proofs: Option<Vec<Proof>>,
 }
 
-impl<T: Config> URAuthDoc<T> {
-    pub fn new(id: DocId, uri: URI, multi_owner_did: MultiDID<T::AccountId>, created_at: u128) -> Self {
+impl<Account> URAuthDoc<Account> 
+where
+    Account: PartialEq + Clone
+{
+    pub fn new(id: DocId, uri: URI, multi_owner_did: MultiDID<Account>, created_at: u128) -> Self {
         Self {
             id,
             uri,
@@ -349,54 +367,77 @@ impl<T: Config> URAuthDoc<T> {
         self.uri.clone()
     }
 
-    pub fn get_multi_did(&self) -> MultiDID<T::AccountId> {
+    pub fn get_multi_did(&self) -> MultiDID<Account> {
         self.multi_owner_did.clone()
     }
 
-    pub fn update_doc(&mut self, update_field: &UpdateDocField<T::AccountId>, updated_at: Option<u128>) -> Result<(), DispatchError>{
+    pub fn update_doc(&mut self, update_field: &UpdateDocField<Account>, updated_at: Option<u128>) -> Result<DIDWeight, URAuthDocUpdateError> {
         if !matches!(update_field, UpdateDocField::Proof(_)) {
-            let at = updated_at.ok_or(Error::<T>::UpdatedAtMissing)?;
-            self.updated_at = at;
+            if let Some(at) = updated_at {
+                self.updated_at = at;
+            } else {
+                return Err(URAuthDocUpdateError::UpdatedAtMissing)
+            }
         }
+        let current_threshold = self.multi_owner_did.get_threshold();
         match update_field.clone() {
             UpdateDocField::MultiDID(weighted_did) => {
                 self.multi_owner_did.add_owner(weighted_did);
-                self
+            },
+            UpdateDocField::Threshold(new) => {
+                let total_weight = self.multi_owner_did.total_weight();
+                if total_weight < new {
+                    return Err(URAuthDocUpdateError::ThreholdError)
+                }
+                self.multi_owner_did.set_threshold(new);
             },
             UpdateDocField::IdentityInfo(identity_info) => { 
                 self.identity_info = identity_info;
-                self
             },
             UpdateDocField::ContentMetadata(content_metadata) => { 
                 self.content_metadata = content_metadata;
-                self
             },
             UpdateDocField::CopyrightInfo(copyright_info) => { 
                 self.copyright_info = copyright_info;
-                self
             },
             UpdateDocField::AccessRules(access_rules) => {
                 self.access_rules = access_rules;
-                self
             },
             UpdateDocField::Proof(proof) => {
                 let mut updated = self.proofs.take().map_or(Default::default(), |proofs| proofs);
                 updated.push(proof);
                 self.proofs = Some(updated);
-                self
             }
         };
 
-        Ok(())
+        Ok(current_threshold)
     }
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum UpdateDocField<Account> {
     MultiDID(WeightedDID<Account>),
+    Threshold(DIDWeight),
     IdentityInfo(Option<Vec<Vec<u8>>>),
     ContentMetadata(Option<ContentMetadata>),
     CopyrightInfo(Option<CopyrightInfo>),
     AccessRules(Option<Vec<AccessRule>>),
     Proof(Proof),
+}
+
+/// Errors that may happen on offence reports.
+#[derive(PartialEq, sp_runtime::RuntimeDebug)]
+pub enum URAuthDocUpdateError {
+	UpdatedAtMissing,
+    ThreholdError,
+}
+
+impl sp_runtime::traits::Printable for URAuthDocUpdateError {
+    fn print(&self) {
+        "URAuthDocUpdateError".print();
+        match self {
+            Self::UpdatedAtMissing => "UpdatedAtMissing".print(),
+            Self::ThreholdError => "GreaterThanTotalWeight".print(),
+        }
+    }
 }
