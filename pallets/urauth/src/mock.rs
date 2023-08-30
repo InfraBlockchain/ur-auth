@@ -96,7 +96,52 @@ pub struct ExtBuilder {
 
 pub struct MockURAuthHelper<Account: Encode> {
     pub mock_doc_manager: MockURAuthDocManager,
-    pub mock_pnv_manager: MockPnVManager<Account>,
+    pub mock_prover: MockProver<Account>,
+}
+
+impl<Account: Encode>MockURAuthHelper<Account> {
+    pub fn default(
+        uri: Option<String>, 
+        account_id: Option<String>, 
+        timestamp: Option<String>, 
+        challenge_value: Option<String>,
+    ) -> Self {
+        Self {
+            mock_doc_manager: MockURAuthDocManager::new(
+                uri.map_or(String::from("www.website1.com"), |uri| uri), 
+                account_id.map_or(String::from(ALICE_SS58), |id| id), 
+                challenge_value.map_or(String::from("E40Bzg8kAvOIjswwxc29WaQCHuOKwoZC"), |cv| cv), 
+                timestamp.map_or(String::from("2023-07-28T10:17:21Z"), |t| t), 
+                None, 
+                None
+            ),
+            mock_prover: MockProver { proof_type: None }
+        }
+    }
+
+    pub fn deconstruct_urauth_doc(&self) -> (URI, String, String, String) {
+        self.mock_doc_manager.deconstruct()
+    }
+
+    pub fn set_proof_type(&mut self, proof_type: Option<ProofType<Account>>) {
+        self.mock_prover.set_proof_type(proof_type);
+    }
+
+    pub fn create_raw_payload(&self) -> Vec<u8> {
+        self.mock_prover.raw_payload()
+    }
+
+    pub fn create_signature(&self, signer: sp_keyring::AccountKeyring) -> MultiSignature {
+        self.mock_prover.create_signature(signer)
+    }
+
+    pub fn to_uri(&self) -> URI {
+        self.mock_doc_manager.to_uri()
+    }
+
+    pub fn generate_json(&self) -> String {
+        self.mock_doc_manager.generate_json()
+    }
 }
 
 pub enum ProofType<Account: Encode> {
@@ -105,19 +150,19 @@ pub enum ProofType<Account: Encode> {
     Update(URAuthDoc<Account>, Vec<u8>)
 }
 
-pub struct MockPnVManager<Account: Encode> {
-    pub proof_type: ProofType<Account>
+pub struct MockProver<Account: Encode> {
+    pub proof_type: Option<ProofType<Account>>
 }
 
-impl<Account: Encode> MockPnVManager<Account> {
+impl<Account: Encode> MockProver<Account> {
 
-    pub fn set_proof_type(&mut self, proof_type: ProofType<Account>) {
+    fn set_proof_type(&mut self, proof_type: Option<ProofType<Account>>) {
         self.proof_type = proof_type;
     }
 
-    pub fn raw_payload(&self) -> Vec<u8> {
+    fn raw_payload(&self) -> Vec<u8> {
 
-        match &self.proof_type {
+        match self.proof_type.as_ref().expect("Proof type missing!") {
             ProofType::Request(uri, owner_did) => {
                 (uri, owner_did).encode()
             },
@@ -155,13 +200,11 @@ impl<Account: Encode> MockPnVManager<Account> {
         }
     }
 
-    pub fn create_signature(&self, signer: sp_keyring::AccountKeyring) -> MultiSignature {
+    fn create_signature(&self, signer: sp_keyring::AccountKeyring) -> MultiSignature {
         let raw_payload = self.raw_payload();
         let sig = signer.sign(&raw_payload);
         sig.into()
     }
-
-    fn verify() {}
 }
 
 pub struct MockURAuthDocManager {
@@ -169,17 +212,13 @@ pub struct MockURAuthDocManager {
     pub owner_did: String,
     pub challenge_value: String,
     pub timestamp: String,
-    pub proof_type: String,
-    pub proof: String,
+    pub proof_type: Option<String>,
+    pub proof: Option<String>,
 }
 
 impl MockURAuthDocManager {
 
-    pub fn to_uri(&self) -> URI {
-        URI(self.uri.as_bytes().to_vec())
-    }
-
-    pub fn new(uri: String, account_id: String, challenge_value: String, timestamp: String, proof_type: String, proof: String) -> Self {
+    pub fn new(uri: String, account_id: String, challenge_value: String, timestamp: String, proof_type: Option<String>, proof: Option<String>) -> Self {
         let owner_did = MockURAuthDocManager::generate_did(account_id.as_str());
         Self {
             uri,
@@ -191,13 +230,25 @@ impl MockURAuthDocManager {
         }
     }
 
+    fn to_uri(&self) -> URI {
+        URI(self.uri.as_bytes().to_vec())
+    }
+
+    fn deconstruct(&self) -> (URI, String, String, String) {
+        let uri = self.to_uri();
+        (uri, self.owner_did.clone(), self.challenge_value.clone(), self.timestamp.clone())
+    }
+
+    fn challenge_value(&mut self, proof_type: String, proof: String) {
+        self.proof_type = Some(proof_type);
+        self.proof = Some(proof);
+    }
+
     fn generate_did(account_id: &str) -> String {
         format!("{}{}", "did:infra:ua:", account_id)
     }
 
-    pub fn generate_json(
-        &self
-    ) -> String {
+    fn generate_json(&self) -> String {
         use lite_json::Serialize;
     
         let mut object_elements = vec![];
@@ -230,13 +281,13 @@ impl MockURAuthDocManager {
         let object_key = "type".chars().collect();
         proof_object.push((
             object_key,
-            lite_json::JsonValue::String(self.proof_type.chars().collect()),
+            lite_json::JsonValue::String(self.proof_type.as_ref().expect("NO PROOF TYPE").chars().collect()),
         ));
     
         let object_key = "proofValue".chars().collect();
         proof_object.push((
             object_key,
-            lite_json::JsonValue::String(self.proof.chars().collect()),
+            lite_json::JsonValue::String(self.proof.as_ref().expect("NO PROOF").chars().collect()),
         ));
     
         let object_key = "proof".chars().collect();

@@ -233,20 +233,16 @@ fn sig_works() {
 
 #[test]
 fn urauth_request_register_domain_owner_works() {
-    let uri = URI::new("www.website1.com".as_bytes().to_vec());
-    let owner_did = generate_did(ALICE_SS58);
-    let challenge_value = Some(Randomness::default());
+    let urauth_helper = MockURAuthHelper::<MockAccountId>::default(None, None, None, None);
+    let (uri, owner_did, challenge_value, _) = urauth_helper.deconstruct_urauth_doc();
     let signer = MultiSigner::Sr25519(Alice.public());
-    let signature = create_signature(
-        Alice,
-        SigType::URI("www.website1.com".into(), generate_did(ALICE_SS58)),
-    );
+    let signature = urauth_helper.create_signature(Alice);
     new_test_ext().execute_with(|| {
         assert_ok!(URAuth::urauth_request_register_domain_owner(
             RuntimeOrigin::signed(Alice.to_account_id()),
             uri.clone(),
             owner_did.as_bytes().to_vec(),
-            challenge_value.clone(),
+            Some(challenge_value.as_bytes().to_vec()[..].try_into().unwrap()),
             signer.clone(),
             signature.clone()
         ));
@@ -257,7 +253,6 @@ fn urauth_request_register_domain_owner_works() {
             generate_did(ALICE_SS58)
         );
         assert_eq!(metadata.challenge_value, Randomness::default());
-        println!("{:?}", String::from_utf8_lossy(&metadata.owner_did));
         System::assert_has_event(URAuthEvent::URAuthRegisterRequested { uri: uri.clone() }.into());
 
         assert_noop!(
@@ -265,7 +260,7 @@ fn urauth_request_register_domain_owner_works() {
                 RuntimeOrigin::signed(Alice.to_account_id()),
                 uri.clone(),
                 generate_did(BOB_SS58).as_bytes().to_vec(),
-                challenge_value.clone(),
+                Some(challenge_value.as_bytes().to_vec()[..].try_into().unwrap()),
                 signer.clone(),
                 signature.clone()
             ),
@@ -282,7 +277,7 @@ fn urauth_request_register_domain_owner_works() {
                 RuntimeOrigin::signed(Alice.to_account_id()),
                 uri.clone(),
                 owner_did.as_bytes().to_vec(),
-                challenge_value.clone(),
+                Some(challenge_value.as_bytes().to_vec()[..].try_into().unwrap()),
                 signer.clone(),
                 signature2
             ),
@@ -298,7 +293,7 @@ fn urauth_request_register_domain_owner_works() {
                 RuntimeOrigin::signed(Alice.to_account_id()),
                 uri.clone(),
                 owner_did.as_bytes().to_vec(),
-                challenge_value.clone(),
+                Some(challenge_value.as_bytes().to_vec()[..].try_into().unwrap()),
                 signer.clone(),
                 signature3
             ),
