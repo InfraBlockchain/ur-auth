@@ -665,8 +665,8 @@ impl_runtime_apis! {
     impl pallet_urauth_runtime_api::URAuthApi<Block, AccountId> for Runtime {
 
         fn get_updated_urauth_doc(
-            uri: pallet_urauth::URI,  
-            update_field: pallet_urauth::UpdateDocField<AccountId>, 
+            uri: pallet_urauth::URI,
+            update_field: pallet_urauth::UpdateDocField<AccountId>,
             updated_at: u128
         ) -> Option<pallet_urauth::URAuthDoc<AccountId>> {
             pallet_urauth::Pallet::<Runtime>::get_updated_doc(uri, update_field, updated_at)

@@ -249,7 +249,7 @@ impl<Account: PartialEq> MultiDID<Account> {
     pub fn is_owner(&self, who: &Account) -> bool {
         for weighted_did in self.dids.iter() {
             if &weighted_did.did == who {
-                return true
+                return true;
             }
         }
         false
@@ -420,15 +420,15 @@ where
                 let current_threshold = self.multi_owner_did.get_threshold();
                 update_doc_status.set_remaining_threshold(current_threshold);
                 self.remove_all_prev_proofs();
-            },
+            }
             UpdateStatus::InProgress(field) => {
                 if field != update_field {
-                    return Err(URAuthDocUpdateError::UpdateInProgress)
+                    return Err(URAuthDocUpdateError::UpdateInProgress);
                 }
-            },
+            }
         }
         if !self.check_valid_updated_at(updated_at) {
-            return Err(URAuthDocUpdateError::InvalidUpdateAt)
+            return Err(URAuthDocUpdateError::InvalidUpdateAt);
         }
         self.updated_at = updated_at;
         match update_field.clone() {
@@ -473,31 +473,34 @@ pub enum UpdateDocField<Account> {
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum UpdateStatus<Account> {
     InProgress(UpdateDocField<Account>),
-    Available
+    Available,
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub struct UpdateDocStatus<Account> {
     pub remaining_threshold: DIDWeight,
-    pub status: UpdateStatus<Account>
+    pub status: UpdateStatus<Account>,
 }
 
 impl<Account> Default for UpdateDocStatus<Account> {
     fn default() -> Self {
         Self {
             remaining_threshold: Default::default(),
-            status: UpdateStatus::Available
+            status: UpdateStatus::Available,
         }
     }
 }
 
 impl<Account> UpdateDocStatus<Account> {
-
     pub fn is_update_available(&self) -> bool {
         matches!(self.status, UpdateStatus::Available)
     }
 
-    pub fn handle_in_progress(&mut self, did_weight: DIDWeight, updated_field: UpdateDocField<Account>) {
+    pub fn handle_in_progress(
+        &mut self,
+        did_weight: DIDWeight,
+        updated_field: UpdateDocField<Account>,
+    ) {
         self.calc_remaining_threshold(did_weight);
         self.status_to_in_progress(updated_field);
     }
@@ -521,7 +524,7 @@ pub enum URAuthDocUpdateError {
     UpdatedAtMissing,
     ThreholdError,
     InvalidUpdateAt,
-    UpdateInProgress
+    UpdateInProgress,
 }
 
 impl sp_runtime::traits::Printable for URAuthDocUpdateError {
@@ -531,7 +534,7 @@ impl sp_runtime::traits::Printable for URAuthDocUpdateError {
             Self::UpdatedAtMissing => "UpdatedAtMissing".print(),
             Self::ThreholdError => "GreaterThanTotalWeight".print(),
             Self::InvalidUpdateAt => "InvalidUpdatedAt".print(),
-            Self::UpdateInProgress => "UpdateInProgress".print()
+            Self::UpdateInProgress => "UpdateInProgress".print(),
         }
     }
 }

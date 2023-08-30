@@ -107,7 +107,7 @@ pub mod pallet {
         },
         UpdateInProgress {
             urauth_doc: URAuthDoc<T::AccountId>,
-            update_doc_status: UpdateDocStatus<T::AccountId>
+            update_doc_status: UpdateDocStatus<T::AccountId>,
         },
         Removed {
             uri: URI,
@@ -348,10 +348,10 @@ impl<T: Config> Pallet<T> {
     fn handle_updated_urauth_doc(
         signer: AccountId32,
         proof: Proof,
-        urauth_doc: &mut URAuthDoc<T::AccountId>, 
-        update_doc_status: &mut UpdateDocStatus<T::AccountId>, 
-        updated_field: UpdateDocField<T::AccountId>
-    ) -> Result<(), DispatchError>{
+        urauth_doc: &mut URAuthDoc<T::AccountId>,
+        update_doc_status: &mut UpdateDocStatus<T::AccountId>,
+        updated_field: UpdateDocField<T::AccountId>,
+    ) -> Result<(), DispatchError> {
         let multi_did = urauth_doc.get_multi_did();
         let uri = urauth_doc.get_uri();
         let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
@@ -361,7 +361,7 @@ impl<T: Config> Pallet<T> {
         let remaining_threshold = update_doc_status.remaining_threshold;
         urauth_doc.add_proof(proof);
         if did_weight >= remaining_threshold {
-            // Compelete 
+            // Compelete
             URAuthTree::<T>::insert(uri, urauth_doc.clone());
             URAuthDocUpdateStatus::<T>::remove(urauth_doc.id);
             Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated {
@@ -374,7 +374,7 @@ impl<T: Config> Pallet<T> {
             URAuthDocUpdateStatus::<T>::insert(urauth_doc.id, update_doc_status.clone());
             Pallet::<T>::deposit_event(Event::<T>::UpdateInProgress {
                 urauth_doc: urauth_doc.clone(),
-                update_doc_status: update_doc_status.clone()
+                update_doc_status: update_doc_status.clone(),
             });
         }
         Ok(())
@@ -410,8 +410,13 @@ impl<T: Config> Pallet<T> {
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
         updated_field: UpdateDocField<T::AccountId>,
     ) -> Result<(), DispatchError> {
-
-        Self::handle_updated_urauth_doc(signer, proof, urauth_doc, update_doc_status, updated_field)?;
+        Self::handle_updated_urauth_doc(
+            signer,
+            proof,
+            urauth_doc,
+            update_doc_status,
+            updated_field,
+        )?;
 
         Ok(())
     }
