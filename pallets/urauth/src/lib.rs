@@ -222,7 +222,8 @@ pub mod pallet {
             proof: Option<Proof>,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            let (mut updated_urauth_doc, mut update_doc_status) = Self::try_update_urauth_doc(&uri, &update_field, updated_at)?;
+            let (mut updated_urauth_doc, mut update_doc_status) =
+                Self::try_update_urauth_doc(&uri, &update_field, updated_at)?;
             let (owner, proof) = Self::try_verify_urauth_doc_proof(&updated_urauth_doc, proof)?;
             Self::try_store_updated_urauth_doc(
                 owner,
@@ -251,7 +252,7 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn update_urauth_config(
             origin: OriginFor<T>,
-            randomness_enabled: bool
+            randomness_enabled: bool,
         ) -> DispatchResult {
             T::AuthorizedOrigin::ensure_origin(origin)?;
 
@@ -279,8 +280,12 @@ impl<T: Config> Pallet<T> {
         Default::default()
     }
 
-    fn verify_request_proof(uri: &URI, owner_did: &OwnerDID, signature: &MultiSignature, signer: MultiSigner) -> Result<(), DispatchError> {
-
+    fn verify_request_proof(
+        uri: &URI,
+        owner_did: &OwnerDID,
+        signature: &MultiSignature,
+        signer: MultiSigner,
+    ) -> Result<(), DispatchError> {
         let urauth_signed_payload = URAuthSignedPayload::<T::AccountId>::Request {
             uri: uri.clone(),
             owner_did: owner_did.clone(),
@@ -303,7 +308,12 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
-    fn handle_verification_submission_result(res: &VerificationSubmissionResult, verficiation_submission: VerificationSubmission<T>, uri: &URI, owner_did: T::AccountId) -> Result<(), DispatchError>{
+    fn handle_verification_submission_result(
+        res: &VerificationSubmissionResult,
+        verficiation_submission: VerificationSubmission<T>,
+        uri: &URI,
+        owner_did: T::AccountId,
+    ) -> Result<(), DispatchError> {
         match res {
             VerificationSubmissionResult::Complete => {
                 let mut count = Counter::<T>::get();
@@ -323,7 +333,9 @@ impl<T: Config> Pallet<T> {
                 })
             }
             VerificationSubmissionResult::Tie => Self::remove_all_uri_related(uri.clone()),
-            VerificationSubmissionResult::InProgress => { URIVerificationInfo::<T>::insert(&uri, verficiation_submission) }
+            VerificationSubmissionResult::InProgress => {
+                URIVerificationInfo::<T>::insert(&uri, verficiation_submission)
+            }
         }
 
         Ok(())
@@ -366,9 +378,13 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
-    fn try_update_urauth_doc(uri: &URI, update_field: &UpdateDocField<T::AccountId>, updated_at: u128) -> Result<(URAuthDoc<T::AccountId>, UpdateDocStatus<T::AccountId>), DispatchError> {
+    fn try_update_urauth_doc(
+        uri: &URI,
+        update_field: &UpdateDocField<T::AccountId>,
+        updated_at: u128,
+    ) -> Result<(URAuthDoc<T::AccountId>, UpdateDocStatus<T::AccountId>), DispatchError> {
         let mut urauth_doc =
-                URAuthTree::<T>::get(uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
+            URAuthTree::<T>::get(uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
         let mut update_doc_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id);
         urauth_doc
             .update_doc(&mut update_doc_status, &update_field, updated_at)
