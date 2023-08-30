@@ -99,7 +99,7 @@ pub mod pallet {
         },
         VerificationInfo {
             uri: URI,
-            progress_status: VerificationResult,
+            progress_status: VerificationSubmissionResult,
         },
         URAuthDocUpdated {
             updated_field: UpdateDocField<T::AccountId>,
@@ -156,25 +156,9 @@ pub mod pallet {
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
 
-            let urauth_signed_payload = URAuthSignedPayload::<T::AccountId>::Request {
-                uri: uri.clone(),
-                owner_did: owner_did.clone(),
-            };
+            Self::verify_request_proof(&uri, &owner_did, &signature, signer)?;
 
-            // Check whether account id of owner did and signer are same
-            let signer_account_id = Self::account_id_from_source(AccountIdSource::AccountId32(
-                signer.clone().into_account(),
-            ))?;
-            Self::check_is_valid_owner(&owner_did, &signer_account_id)?;
-
-            // Check signature
-            if !urauth_signed_payload
-                .using_encoded(|payload| signature.verify(payload, &signer.into_account()))
-            {
-                return Err(Error::<T>::BadProof.into());
-            }
-
-            let cv = if URAuthConfig::<T>::get().is_calc_enabled() {
+            let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
             } else {
                 challenge_value.ok_or(Error::<T>::ChallengeValueNotProvided)?
@@ -219,27 +203,7 @@ pub mod pallet {
                 VerificationSubmission::<T>::default()
             };
             let res = vs.submit(member_count, (who, BlakeTwo256::hash(&challenge_value)))?;
-            match res {
-                VerificationResult::Complete => {
-                    let mut count = Counter::<T>::get();
-                    count = count.checked_add(1).ok_or(Error::<T>::Overflow)?;
-                    let urauth_doc: URAuthDoc<T::AccountId> = URAuthDoc::new(
-                        Self::doc_id(count),
-                        uri.clone(),
-                        MultiDID::new(owner, 1),
-                        Self::unix_time(),
-                    );
-                    Counter::<T>::put(count);
-                    URAuthTree::<T>::insert(&uri, urauth_doc.clone());
-                    Self::deposit_event(Event::<T>::URAuthTreeRegistered {
-                        count,
-                        uri: uri.clone(),
-                        urauth_doc,
-                    })
-                }
-                VerificationResult::Tie => Self::remove_all_uri_related(uri.clone()),
-                _ => { /* In progress */ }
-            }
+            Self::handle_verification_submission_result(&res, vs, &uri, owner)?;
             Self::deposit_event(Event::<T>::VerificationInfo {
                 uri,
                 progress_status: res,
@@ -258,21 +222,13 @@ pub mod pallet {
             proof: Option<Proof>,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            let mut urauth_doc =
-                URAuthTree::<T>::get(&uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
-            let mut update_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id);
-            urauth_doc
-                .update_doc(&mut update_status, &update_field, updated_at)
-                .map_err(|e| {
-                    log::info!(" 🚨 Error on update urauth_doc {:?} 🚨", e);
-                    Error::<T>::ErrorOnUpdateDoc
-                })?;
-            let (owner, proof) = Self::try_verify_urauth_doc_proof(&urauth_doc, proof)?;
+            let (mut updated_urauth_doc, mut update_doc_status) = Self::try_update_urauth_doc(&uri, &update_field, updated_at)?;
+            let (owner, proof) = Self::try_verify_urauth_doc_proof(&updated_urauth_doc, proof)?;
             Self::try_store_updated_urauth_doc(
                 owner,
                 proof,
-                &mut urauth_doc,
-                &mut update_status,
+                &mut updated_urauth_doc,
+                &mut update_doc_status,
                 update_field,
             )?;
 
@@ -287,6 +243,21 @@ pub mod pallet {
             OracleMembers::<T>::mutate(|m| {
                 m.try_push(who).map_err(|_| Error::<T>::MaxOracleMembers)
             })?;
+
+            Ok(())
+        }
+
+        #[pallet::call_index(5)]
+        #[pallet::weight(1_000)]
+        pub fn update_urauth_config(
+            origin: OriginFor<T>,
+            randomness_enabled: bool
+        ) -> DispatchResult {
+            T::AuthorizedOrigin::ensure_origin(origin)?;
+
+            URAuthConfig::<T>::mutate(|challenge_value_config| {
+                challenge_value_config.set_randomness_enabled(randomness_enabled);
+            });
 
             Ok(())
         }
@@ -306,6 +277,56 @@ impl<T: Config> Pallet<T> {
     // ToDo
     fn challenge_value() -> Randomness {
         Default::default()
+    }
+
+    fn verify_request_proof(uri: &URI, owner_did: &OwnerDID, signature: &MultiSignature, signer: MultiSigner) -> Result<(), DispatchError> {
+
+        let urauth_signed_payload = URAuthSignedPayload::<T::AccountId>::Request {
+            uri: uri.clone(),
+            owner_did: owner_did.clone(),
+        };
+
+        // Check whether account id of owner did and signer are same
+        let signer_account_id = Self::account_id_from_source(AccountIdSource::AccountId32(
+            signer.clone().into_account(),
+        ))?;
+
+        Self::check_is_valid_owner(owner_did, &signer_account_id)?;
+
+        // Check signature
+        if !urauth_signed_payload
+            .using_encoded(|payload| signature.verify(payload, &signer.into_account()))
+        {
+            return Err(Error::<T>::BadProof.into());
+        }
+
+        Ok(())
+    }
+
+    fn handle_verification_submission_result(res: &VerificationSubmissionResult, verficiation_submission: VerificationSubmission<T>, uri: &URI, owner_did: T::AccountId) -> Result<(), DispatchError>{
+        match res {
+            VerificationSubmissionResult::Complete => {
+                let mut count = Counter::<T>::get();
+                count = count.checked_add(1).ok_or(Error::<T>::Overflow)?;
+                let urauth_doc: URAuthDoc<T::AccountId> = URAuthDoc::new(
+                    Self::doc_id(count),
+                    uri.clone(),
+                    MultiDID::new(owner_did, 1),
+                    Self::unix_time(),
+                );
+                Counter::<T>::put(count);
+                URAuthTree::<T>::insert(&uri, urauth_doc.clone());
+                Self::deposit_event(Event::<T>::URAuthTreeRegistered {
+                    count,
+                    uri: uri.clone(),
+                    urauth_doc,
+                })
+            }
+            VerificationSubmissionResult::Tie => Self::remove_all_uri_related(uri.clone()),
+            VerificationSubmissionResult::InProgress => { URIVerificationInfo::<T>::insert(&uri, verficiation_submission) }
+        }
+
+        Ok(())
     }
 
     fn try_verify_challenge_value(
@@ -343,6 +364,19 @@ impl<T: Config> Pallet<T> {
         let cv = ChallengeValue::<T>::get(&uri).ok_or(Error::<T>::ChallengeValueMissing)?;
         ensure!(challenge == cv.to_vec(), Error::<T>::BadChallengeValue);
         Ok(())
+    }
+
+    fn try_update_urauth_doc(uri: &URI, update_field: &UpdateDocField<T::AccountId>, updated_at: u128) -> Result<(URAuthDoc<T::AccountId>, UpdateDocStatus<T::AccountId>), DispatchError> {
+        let mut urauth_doc =
+                URAuthTree::<T>::get(uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
+        let mut update_doc_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id);
+        urauth_doc
+            .update_doc(&mut update_doc_status, &update_field, updated_at)
+            .map_err(|e| {
+                log::info!(" 🚨 Error on update urauth_doc {:?} 🚨", e);
+                Error::<T>::ErrorOnUpdateDoc
+            })?;
+        Ok((urauth_doc, update_doc_status))
     }
 
     fn handle_updated_urauth_doc(

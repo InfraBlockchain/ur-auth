@@ -212,17 +212,17 @@ fn verfiication_submission_update_status_works() {
     let h2 = BlakeTwo256::hash(&2u32.to_le_bytes());
     let h3 = BlakeTwo256::hash(&3u32.to_le_bytes());
     let res = s2.submit(3, (Alice.to_account_id(), h1)).unwrap();
-    assert_eq!(res, VerificationResult::InProgress);
+    assert_eq!(res, VerificationSubmissionResult::InProgress);
     let res = s2.submit(3, (Bob.to_account_id(), h2)).unwrap();
-    assert_eq!(res, VerificationResult::InProgress);
+    assert_eq!(res, VerificationSubmissionResult::InProgress);
     let res = s2.submit(3, (Charlie.to_account_id(), h3)).unwrap();
-    assert_eq!(res, VerificationResult::Tie);
+    assert_eq!(res, VerificationSubmissionResult::Tie);
 
     // 1 member and submit
     let mut s3: VerificationSubmission<Test> = Default::default();
     let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
     let res = s3.submit(1, (Alice.to_account_id(), h1)).unwrap();
-    assert_eq!(res, VerificationResult::Complete);
+    assert_eq!(res, VerificationSubmissionResult::Complete);
 }
 
 pub enum SigType {
@@ -405,7 +405,7 @@ fn verify_challenge_works() {
         System::assert_has_event(
             URAuthEvent::<Test>::VerificationInfo {
                 uri: uri.clone(),
-                progress_status: VerificationResult::Complete,
+                progress_status: VerificationSubmissionResult::Complete,
             }
             .into(),
         );

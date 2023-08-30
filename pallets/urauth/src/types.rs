@@ -66,7 +66,7 @@ impl<T: Config> Default for VerificationSubmission<T> {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub enum VerificationResult {
+pub enum VerificationSubmissionResult {
     InProgress,
     Complete,
     Tie,
@@ -77,7 +77,7 @@ impl<T: Config> VerificationSubmission<T> {
         &mut self,
         member_count: usize,
         submission: (T::AccountId, H256),
-    ) -> Result<VerificationResult, DispatchError> {
+    ) -> Result<VerificationSubmissionResult, DispatchError> {
         self.update_threshold(member_count);
         for (acc, _) in self.submission.iter() {
             if &submission.0 == acc {
@@ -88,7 +88,7 @@ impl<T: Config> VerificationSubmission<T> {
         Ok(self.check_is_end(member_count))
     }
 
-    fn check_is_end(&self, member_count: usize) -> VerificationResult {
+    fn check_is_end(&self, member_count: usize) -> VerificationSubmissionResult {
         let mut map: BTreeMap<H256, ApprovalCount> = BTreeMap::new();
         let mut is_end = false;
         for (_, c) in self.submission.iter() {
@@ -103,15 +103,15 @@ impl<T: Config> VerificationSubmission<T> {
         }
 
         if is_end {
-            return VerificationResult::Complete;
+            return VerificationSubmissionResult::Complete;
         }
 
         if self.threshold == 1 {
-            VerificationResult::Complete
+            VerificationSubmissionResult::Complete
         } else if self.submission.len() == member_count {
-            VerificationResult::Tie
+            VerificationSubmissionResult::Tie
         } else {
-            VerificationResult::InProgress
+            VerificationSubmissionResult::InProgress
         }
     }
 
@@ -124,24 +124,24 @@ impl<T: Config> VerificationSubmission<T> {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct ChallengeValueConfig {
-    pub is_calc_enabled: bool,
+    pub randomness_enabled: bool,
 }
 
 impl Default for ChallengeValueConfig {
     fn default() -> Self {
         Self {
-            is_calc_enabled: false,
+            randomness_enabled: false,
         }
     }
 }
 
 impl ChallengeValueConfig {
-    pub fn is_calc_enabled(&self) -> bool {
-        self.is_calc_enabled
+    pub fn randomness_enabled(&self) -> bool {
+        self.randomness_enabled
     }
 
-    pub fn set_is_calc_enabled(&mut self, enabled: bool) {
-        self.is_calc_enabled = enabled;
+    pub fn set_randomness_enabled(&mut self, enabled: bool) {
+        self.randomness_enabled = enabled;
     }
 }
 
@@ -537,4 +537,9 @@ impl sp_runtime::traits::Printable for URAuthDocUpdateError {
             Self::UpdateInProgress => "UpdateInProgress".print(),
         }
     }
+}
+
+pub trait RelayChainInterface<EpochIndex, Randomness> {
+    fn get_epoch_index() -> EpochIndex;
+    fn get_epoch_randomness() -> Randomness;
 }
