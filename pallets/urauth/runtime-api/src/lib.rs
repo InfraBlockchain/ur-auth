@@ -10,6 +10,6 @@ sp_api::decl_runtime_apis! {
     where
         Account: Codec
     {
-        fn get_updated_urauth_doc(uri: URI, update_field: UpdateDocField<Account>, updated_at: Option<u128>) -> Option<URAuthDoc<Account>>;
+        fn get_updated_urauth_doc(uri: URI, update_field: UpdateDocField<Account>, updated_at: u128) -> Option<URAuthDoc<Account>>;
     }
 }

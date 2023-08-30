@@ -397,36 +397,40 @@ where
 
     fn check_valid_updated_at(&self, now: u128) -> bool {
         let prev = self.updated_at;
-        sp_std::if_std! {println!("prev {:?} now {:?}", prev, now)}
         prev <= now
+    }
+
+    pub fn add_proof(&mut self, proof: Proof) {
+        let mut some_proofs = self
+            .proofs
+            .take()
+            .map_or(Default::default(), |proofs| proofs);
+        some_proofs.push(proof);
+        self.proofs = Some(some_proofs);
     }
 
     pub fn update_doc(
         &mut self,
-        update_status: &mut UpdateDocStatus<Account>,
+        update_doc_status: &mut UpdateDocStatus<Account>,
         update_field: &UpdateDocField<Account>,
-        updated_at: Option<u128>,
-    ) -> Result<DIDWeight, URAuthDocUpdateError> {
-        match update_status.status {
-            UpdateStatus::Available => self.remove_all_prev_proofs(),
+        updated_at: u128,
+    ) -> Result<(), URAuthDocUpdateError> {
+        match &update_doc_status.status {
+            UpdateStatus::Available => {
+                let current_threshold = self.multi_owner_did.get_threshold();
+                update_doc_status.set_remaining_threshold(current_threshold);
+                self.remove_all_prev_proofs();
+            },
             UpdateStatus::InProgress(field) => {
-                if &field != update_field {
+                if field != update_field {
                     return Err(URAuthDocUpdateError::UpdateInProgress)
                 }
             },
         }
-        if !matches!(update_field, UpdateDocField::Proof(_)) {
-            if let Some(now) = updated_at {
-                if !self.check_valid_updated_at(now) {
-                    return Err(URAuthDocUpdateError::InvalidUpdateAt)
-                }
-                self.updated_at = now;
-            } else {
-                return Err(URAuthDocUpdateError::UpdatedAtMissing);
-            }
+        if !self.check_valid_updated_at(updated_at) {
+            return Err(URAuthDocUpdateError::InvalidUpdateAt)
         }
-        let current_threshold = self.multi_owner_did.get_threshold();
-        update_status.set_remaining_threshold(current_threshold);
+        self.updated_at = updated_at;
         match update_field.clone() {
             UpdateDocField::MultiDID(weighted_did) => {
                 self.multi_owner_did.add_owner(weighted_did);
@@ -450,17 +454,9 @@ where
             UpdateDocField::AccessRules(access_rules) => {
                 self.access_rules = access_rules;
             }
-            UpdateDocField::Proof(proof) => {
-                let mut updated = self
-                    .proofs
-                    .take()
-                    .map_or(Default::default(), |proofs| proofs);
-                updated.push(proof);
-                self.proofs = Some(updated);
-            }
         };
 
-        Ok(current_threshold)
+        Ok(())
     }
 }
 
@@ -472,7 +468,6 @@ pub enum UpdateDocField<Account> {
     ContentMetadata(Option<ContentMetadata>),
     CopyrightInfo(Option<CopyrightInfo>),
     AccessRules(Option<Vec<AccessRule>>),
-    Proof(Proof),
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -490,7 +485,7 @@ pub struct UpdateDocStatus<Account> {
 impl<Account> Default for UpdateDocStatus<Account> {
     fn default() -> Self {
         Self {
-            remaining_threshold: 0u16,
+            remaining_threshold: Default::default(),
             status: UpdateStatus::Available
         }
     }
@@ -502,7 +497,12 @@ impl<Account> UpdateDocStatus<Account> {
         matches!(self.status, UpdateStatus::Available)
     }
 
-    pub fn calc_remaining_threshold(&mut self, did_weight: DIDWeight) {
+    pub fn handle_in_progress(&mut self, did_weight: DIDWeight, updated_field: UpdateDocField<Account>) {
+        self.calc_remaining_threshold(did_weight);
+        self.status_to_in_progress(updated_field);
+    }
+
+    fn calc_remaining_threshold(&mut self, did_weight: DIDWeight) {
         self.remaining_threshold = self.remaining_threshold.saturating_sub(did_weight);
     }
 
@@ -510,8 +510,8 @@ impl<Account> UpdateDocStatus<Account> {
         self.remaining_threshold = threshold;
     }
 
-    pub fn set_status(&mut self, status: UpdateStatus<Account>) {
-        self.status = status;
+    fn status_to_in_progress(&mut self, updated_field: UpdateDocField<Account>) {
+        self.status = UpdateStatus::InProgress(updated_field);
     }
 }
 
