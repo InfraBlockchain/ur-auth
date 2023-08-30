@@ -22,7 +22,7 @@ pub enum Status {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Default, RuntimeDebug, TypeInfo)]
-pub struct URI(Vec<u8>);
+pub struct URI(pub Vec<u8>);
 
 impl URI {
     pub fn new(raw: Vec<u8>) -> Self {
@@ -505,12 +505,12 @@ impl<Account> UpdateDocStatus<Account> {
         self.status_to_in_progress(updated_field);
     }
 
-    fn calc_remaining_threshold(&mut self, did_weight: DIDWeight) {
-        self.remaining_threshold = self.remaining_threshold.saturating_sub(did_weight);
-    }
-
     pub fn set_remaining_threshold(&mut self, threshold: DIDWeight) {
         self.remaining_threshold = threshold;
+    }
+
+    fn calc_remaining_threshold(&mut self, did_weight: DIDWeight) {
+        self.remaining_threshold = self.remaining_threshold.saturating_sub(did_weight);
     }
 
     fn status_to_in_progress(&mut self, updated_field: UpdateDocField<Account>) {

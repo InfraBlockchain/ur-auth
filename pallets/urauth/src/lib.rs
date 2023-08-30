@@ -20,6 +20,9 @@ pub mod types;
 pub use types::*;
 
 #[cfg(test)]
+pub mod mock;
+
+#[cfg(test)]
 pub mod tests;
 
 #[cfg(feature = "runtime-benchmarks")]

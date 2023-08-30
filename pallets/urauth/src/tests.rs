@@ -1,97 +1,17 @@
-pub use super::*;
-pub use crate::{self as pallet_urauth, Event as URAuthEvent, *};
-use frame_support::{assert_noop, assert_ok, parameter_types, traits::Everything};
-use frame_system::EnsureRoot;
-use sp_core::H256;
-use sp_keyring::AccountKeyring::*;
-use sp_runtime::{
-    testing::Header,
-    traits::{BlakeTwo256, IdentityLookup},
-    AccountId32, MultiSignature, MultiSigner,
+
+pub use crate::{
+    *,
+    self as pallet_urauth, 
+    Event as URAuthEvent, 
+    mock::*,
 };
 
-pub type MockBalance = u128;
-pub type MockAccountId = AccountId32;
-pub type MockBlockNumber = u64;
-
-type UncheckedExtrinsic = frame_system::mocking::MockUncheckedExtrinsic<Test>;
-type Block = frame_system::mocking::MockBlock<Test>;
-
-const ALICE_SS58: &str = "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY";
-const BOB_SS58: &str = "5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty";
-// const ALICE_SIG: &str = "686c98752ecc7dccac8d36fc6c6e6440a40c9b6c1d829603712e1be35a5dc82bfa77c78c0a696619ce42060f66cdd860e517e00e8277db82417f3aed17941983";
-// const ALICE_CHALLENGE_VALUE: &str = "[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]";
-
-frame_support::construct_runtime!(
-    pub enum Test where
-        Block = Block,
-        NodeBlock = Block,
-        UncheckedExtrinsic = UncheckedExtrinsic,
-    {
-        System: frame_system::{Pallet, Call, Config, Storage, Event<T>} = 1,
-        Timestamp: pallet_timestamp::{Pallet, Call, Storage} = 2,
-        URAuth: pallet_urauth::{Pallet, Call, Storage, Event<T>} = 99,
-    }
-);
-
-parameter_types! {
-    pub const BlockHashCount: u64 = 250;
-    pub const SS58Prefix: u8 = 42;
-}
-
-impl frame_system::Config for Test {
-    type BaseCallFilter = Everything;
-    type BlockWeights = ();
-    type BlockLength = ();
-    type DbWeight = ();
-    type RuntimeOrigin = RuntimeOrigin;
-    type RuntimeCall = RuntimeCall;
-    type Index = u64;
-    type BlockNumber = MockBlockNumber;
-    type Hash = H256;
-    type Hashing = BlakeTwo256;
-    type AccountId = MockAccountId;
-    type Lookup = IdentityLookup<Self::AccountId>;
-    type Header = Header;
-    type RuntimeEvent = RuntimeEvent;
-    type BlockHashCount = BlockHashCount;
-    type Version = ();
-    type PalletInfo = PalletInfo;
-    type AccountData = ();
-    type OnNewAccount = ();
-    type OnKilledAccount = ();
-    type SystemWeightInfo = ();
-    type SS58Prefix = SS58Prefix;
-    type OnSetCode = ();
-    type MaxConsumers = frame_support::traits::ConstU32<16>;
-}
-
-impl pallet_timestamp::Config for Test {
-    type Moment = u64;
-    type OnTimestampSet = ();
-    type MinimumPeriod = frame_support::traits::ConstU64<5>;
-    type WeightInfo = ();
-}
-
-parameter_types! {
-    pub const MaxOracleMemembers: u32 = 5;
-}
-
-impl pallet_urauth::Config for Test {
-    type RuntimeEvent = RuntimeEvent;
-    type UnixTime = Timestamp;
-    type MaxOracleMemembers = MaxOracleMemembers;
-    type AuthorizedOrigin = EnsureRoot<MockAccountId>;
-}
-
-pub fn new_test_ext() -> sp_io::TestExternalities {
-    let storage = frame_system::GenesisConfig::default()
-        .build_storage::<Test>()
-        .unwrap();
-    let mut ext: sp_io::TestExternalities = storage.into();
-    ext.execute_with(|| System::set_block_number(1)); // For 'Event'
-    ext
-}
+use frame_support::{assert_noop, assert_ok};
+use sp_keyring::AccountKeyring::*;
+use sp_runtime::{
+    traits::BlakeTwo256,
+    AccountId32, MultiSignature, MultiSigner,
+};
 
 fn find_json_value(
     json_object: lite_json::JsonObject,
@@ -118,6 +38,39 @@ fn account_id_from_did_raw(mut raw: Vec<u8>) -> AccountId32 {
     let buf = &temp[..raw_account_id.len()];
     raw_account_id.copy_from_slice(buf);
     raw_account_id.into()
+}
+
+fn create_urauth_doc_payload(urauth_doc: URAuthDoc<MockAccountId>, owner_did: String) -> Vec<u8> {
+    let URAuthDoc {
+        id,
+        uri,
+        created_at,
+        updated_at,
+        multi_owner_did,
+        identity_info,
+        content_metadata,
+        copyright_info,
+        access_rules,
+        ..
+    } = urauth_doc.clone();
+    let raw = (
+        id,
+        uri.clone(),
+        created_at,
+        updated_at,
+        multi_owner_did,
+        identity_info,
+        content_metadata,
+        copyright_info,
+        access_rules,
+        owner_did.as_bytes().to_vec(),
+    )
+        .encode();
+    if raw.len() > 256 {
+        sp_io::hashing::blake2_256(&raw).to_vec()
+    } else {
+        raw
+    }
 }
 
 #[test]
@@ -722,35 +675,46 @@ fn update_urauth_doc_works() {
     });
 }
 
-fn create_urauth_doc_payload(urauth_doc: URAuthDoc<MockAccountId>, owner_did: String) -> Vec<u8> {
-    let URAuthDoc {
-        id,
-        uri,
-        created_at,
-        updated_at,
-        multi_owner_did,
-        identity_info,
-        content_metadata,
-        copyright_info,
-        access_rules,
-        ..
-    } = urauth_doc.clone();
-    let raw = (
-        id,
+#[test]
+fn verify_challenge_with_multiple_oracle_members() {
+
+    let uri = URI::new("www.website1.com".into());
+    let owner_did = generate_did(ALICE_SS58);
+    let challenge_value = "E40Bzg8kAvOIjswwxc29WaQCHuOKwoZC";
+    let timestamp = "2023-07-28T10:17:21Z";
+    let msg = (
         uri.clone(),
-        created_at,
-        updated_at,
-        multi_owner_did,
-        identity_info,
-        content_metadata,
-        copyright_info,
-        access_rules,
         owner_did.as_bytes().to_vec(),
+        challenge_value.as_bytes().to_vec(),
+        timestamp.as_bytes().to_vec(),
     )
         .encode();
-    if raw.len() > 256 {
-        sp_io::hashing::blake2_256(&raw).to_vec()
-    } else {
-        raw
-    }
+    let sig = Alice.sign(&msg);
+    let request_signature = create_signature(
+        Alice,
+        SigType::URI("www.website1.com".into(), generate_did(ALICE_SS58)),
+    );
+
+    let json_str = generate_json(
+        "www.website1.com".into(),
+        owner_did.clone(),
+        challenge_value.into(),
+        timestamp.into(),
+        "Sr25519Signature2020".into(),
+        hex::encode(sig).clone(),
+    );
+    new_test_ext().execute_with(|| {
+        assert_ok!(
+            URAuth::add_oracle_member(RuntimeOrigin::root(), Alice.to_account_id())
+        );
+        assert_ok!(
+            URAuth::add_oracle_member(RuntimeOrigin::root(), Bob.to_account_id())
+        );
+        assert_ok!(
+            URAuth::add_oracle_member(RuntimeOrigin::root(), Charlie.to_account_id())
+        );
+        assert!(OracleMembers::<Test>::get().len() == 3);
+
+        
+    })
 }
