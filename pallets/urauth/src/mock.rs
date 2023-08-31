@@ -71,13 +71,13 @@ impl pallet_timestamp::Config for Test {
 }
 
 parameter_types! {
-    pub const MaxOracleMemembers: u32 = 5;
+    pub const MaxOracleMembers: u32 = 5;
 }
 
 impl pallet_urauth::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type UnixTime = Timestamp;
-    type MaxOracleMemembers = MaxOracleMemembers;
+    type MaxOracleMembers = MaxOracleMembers;
     type AuthorizedOrigin = EnsureRoot<MockAccountId>;
 }
 

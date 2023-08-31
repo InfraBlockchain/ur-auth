@@ -22,6 +22,7 @@ nuuid = { version = "0.5.0", default-features = false }
 fixedstr = {version = "0.4", default-features = false }
 hex = { version = "0.4.3", default-features = false }
 log = { version = "0.4.17", default-features = false }
+serde = { version = "1.0.136", optional = true, features = ["derive"] }
 
 # Substrate
 frame-benchmarking = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, optional = true, branch = "master" }
@@ -36,7 +37,6 @@ sp-consensus-vrf = { git = "https://github.com/InfraBlockchain/infra-substrate",
 
 [dev-dependencies]
 sp-keyring = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
-serde = { version = "1.0.132" }
 pallet-timestamp = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 
 [features]
@@ -51,6 +51,7 @@ std = [
     "nuuid/std",
     "fixedstr/std",
     "hex/std",
+    "serde",
 	"frame-benchmarking/std",
 	"frame-support/std",
 	"frame-system/std",

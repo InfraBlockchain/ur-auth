@@ -219,7 +219,7 @@ fn testnet_genesis(
         // no need to pass anything to aura, in fact it will panic if we do. Session will take care
         // of this.
         sudo: parachain_template_runtime::SudoConfig {
-            key: Some(root_key),
+            key: Some(root_key.clone()),
         },
         assets: pallet_assets::GenesisConfig {
             assets: vec![(
@@ -243,5 +243,6 @@ fn testnet_genesis(
             safe_xcm_version: Some(SAFE_XCM_VERSION),
         },
         transaction_payment: Default::default(),
+        ur_auth: Default::default(),
     }
 }

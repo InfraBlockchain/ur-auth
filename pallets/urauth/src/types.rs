@@ -4,6 +4,8 @@ use codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
 use sp_runtime::RuntimeDebug;
 use sp_std::collections::btree_map::BTreeMap;
+#[cfg(feature = "std")]
+use serde::{Serialize, Deserialize};
 
 pub type DIDWeight = u16;
 pub type OwnerDID = Vec<u8>;
@@ -123,6 +125,7 @@ impl<T: Config> VerificationSubmission<T> {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct ChallengeValueConfig {
     pub randomness_enabled: bool,
 }

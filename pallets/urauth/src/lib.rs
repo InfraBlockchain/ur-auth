@@ -45,7 +45,7 @@ pub mod pallet {
 
         type UnixTime: UnixTime;
 
-        type MaxOracleMemembers: Get<u32>;
+        type MaxOracleMembers: Get<u32>;
 
         type AuthorizedOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
@@ -76,7 +76,7 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::getter(fn oracle_members)]
     pub type OracleMembers<T: Config> =
-        StorageValue<_, BoundedVec<T::AccountId, T::MaxOracleMemembers>, ValueQuery>;
+        StorageValue<_, BoundedVec<T::AccountId, T::MaxOracleMembers>, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::unbounded]
@@ -84,6 +84,31 @@ pub mod pallet {
 
     #[pallet::storage]
     pub type Counter<T: Config> = StorageValue<_, URAuthDocCount, ValueQuery>;
+
+    #[pallet::genesis_config]
+    pub struct GenesisConfig<T: Config> {
+        pub oracle_members: Vec<T::AccountId>,
+        pub challenge_value_config: ChallengeValueConfig,
+    }
+
+    #[cfg(feature = "std")]
+    impl<T: Config> Default for GenesisConfig<T> {
+        fn default() -> Self {
+            GenesisConfig { 
+                oracle_members: Default::default(), 
+                challenge_value_config: Default::default() 
+            }
+        }
+    }
+
+    #[pallet::genesis_build]
+    impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
+        fn build(&self) {
+            let oracle_members: BoundedVec<T::AccountId, T::MaxOracleMembers> = self.oracle_members.clone().try_into().expect("Max Oracle members reached!");
+            OracleMembers::<T>::put(oracle_members);
+            URAuthConfig::<T>::put(self.challenge_value_config.clone());
+        }
+    }
 
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
