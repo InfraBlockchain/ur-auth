@@ -390,10 +390,6 @@ where
         self.multi_owner_did.threshold
     }
 
-    pub fn set_updated_at(&mut self, updated_at: u128) {
-        self.updated_at = updated_at;
-    }
-
     pub fn get_uri(&self) -> URI {
         self.uri.clone()
     }
@@ -418,9 +414,11 @@ where
 
     pub fn update_doc(
         &mut self,
-        update_doc_field: &UpdateDocField<Account>,
+        update_doc_field: UpdateDocField<Account>,
+        updated_at: u128
     ) -> Result<(), URAuthDocUpdateError> {
-        match update_doc_field.clone() {
+        self.updated_at = updated_at;
+        match update_doc_field {
             UpdateDocField::MultiDID(weighted_did) => {
                 self.multi_owner_did.add_owner(weighted_did);
             }
@@ -493,9 +491,10 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         self.remaining_threshold = threshold;
     }
 
-    pub fn handle_available(&mut self, threshold: DIDWeight, field: UpdateDocField<Account>, proofs: Option<Vec<Proof>>) {
+    pub fn handle_available(&mut self, threshold: DIDWeight, update_doc_field: UpdateDocField<Account>, proof: Proof) {
+        let proofs: Option<Vec<Proof>> = Some(vec![proof]);
         self.set_remaining_threshold(threshold);
-        self.in_progress(field, proofs);
+        self.in_progress(update_doc_field, proofs);
     }
 
     pub fn handle_in_progress(
@@ -503,10 +502,15 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         did_weight: DIDWeight,
         update_doc_field: UpdateDocField<Account>,
         proof: Proof
-    ) {
-        let maybe_proofs = self.add_proof(proof);
-        self.calc_remaining_threshold(did_weight);
-        self.in_progress(update_doc_field, maybe_proofs);
+    ) -> Result<(), UpdateDocStatusError> {
+        if let Some(proofs) = self.add_proof(proof) {
+            self.calc_remaining_threshold(did_weight);
+            self.in_progress(update_doc_field, Some(proofs));
+        } else {
+            return Err(UpdateDocStatusError::ProofMissing.into())
+        }
+
+        Ok(())
     }
 
     pub fn get_proofs(&self) -> Option<Vec<Proof>> {
@@ -560,6 +564,21 @@ impl sp_runtime::traits::Printable for URAuthDocUpdateError {
             Self::ThreholdError => "GreaterThanTotalWeight".print(),
             Self::InvalidUpdateAt => "InvalidUpdatedAt".print(),
             Self::UpdateInProgress => "UpdateInProgress".print(),
+        }
+    }
+}
+
+/// Errors that may happen on offence reports.
+#[derive(PartialEq, sp_runtime::RuntimeDebug)]
+pub enum UpdateDocStatusError {
+    ProofMissing
+}
+
+impl sp_runtime::traits::Printable for UpdateDocStatusError {
+    fn print(&self) {
+        "UpdateDocStatusError".print();
+        match self {
+            Self::ProofMissing => "PrrofMissingOnUpdate".print()
         }
     }
 }

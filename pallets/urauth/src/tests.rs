@@ -313,8 +313,7 @@ fn update_urauth_doc_works() {
         println!("");
         println!("{:?}", urauth_doc);
 
-        let mut update_doc_status = URAuthDocUpdateStatus::<Test>::get(&urauth_doc.id);
-        let update_field = UpdateDocField::AccessRules(Some(vec![AccessRule::AccessRuleV1 {
+        let update_doc_field = UpdateDocField::AccessRules(Some(vec![AccessRule::AccessRuleV1 {
             path: "/raf".as_bytes().to_vec(),
             rules: vec![Rule {
                 user_agents: vec![UserAgent("GPTBOT".as_bytes().to_vec())],
@@ -330,13 +329,13 @@ fn update_urauth_doc_works() {
             }],
         }]));
         urauth_doc
-            .update_doc(&mut update_doc_status, &update_field, 1)
+            .update_doc(update_doc_field.clone(), 1)
             .unwrap();
         let update_signature = urauth_helper.create_sr25519_signature(Alice, ProofType::Update(urauth_doc.clone(), owner_did.clone()));
         assert_ok!(URAuth::update_urauth_doc(
             RuntimeOrigin::signed(Alice.to_account_id()),
             uri.clone(),
-            update_field,
+            update_doc_field,
             1u128,
             Some(Proof::ProofV1 {
                 did: owner_did.clone(),
@@ -349,19 +348,18 @@ fn update_urauth_doc_works() {
         println!("");
         println!("{:?}", urauth_doc);
 
-        let update_field = UpdateDocField::MultiDID(WeightedDID {
+        let update_doc_field = UpdateDocField::MultiDID(WeightedDID {
             did: Bob.to_account_id(),
             weight: 1,
         });
-        let mut update_doc_status = URAuthDocUpdateStatus::<Test>::get(&urauth_doc.id);
         urauth_doc
-            .update_doc(&mut update_doc_status, &update_field, 2)
+            .update_doc( update_doc_field.clone(), 2)
             .unwrap();
         let update_signature = urauth_helper.create_sr25519_signature(Alice, ProofType::Update(urauth_doc.clone(), owner_did.clone()));
         assert_ok!(URAuth::update_urauth_doc(
             RuntimeOrigin::signed(Alice.to_account_id()),
             uri.clone(),
-            update_field,
+            update_doc_field,
             2u128,
             Some(Proof::ProofV1 {
                 did: owner_did.clone(),
@@ -375,16 +373,15 @@ fn update_urauth_doc_works() {
         println!("");
         println!("{:?}", urauth_doc);
 
-        let update_field = UpdateDocField::Threshold(2);
-        let mut update_doc_status = URAuthDocUpdateStatus::<Test>::get(&urauth_doc.id);
+        let update_doc_field = UpdateDocField::<MockAccountId>::Threshold(2);
         urauth_doc
-            .update_doc(&mut update_doc_status, &update_field, 3)
+            .update_doc(update_doc_field.clone(), 3)
             .unwrap();
         let update_signature = urauth_helper.create_sr25519_signature(Alice, ProofType::Update(urauth_doc.clone(), owner_did.clone()));
         assert_ok!(URAuth::update_urauth_doc(
             RuntimeOrigin::signed(Alice.to_account_id()),
             uri.clone(),
-            update_field,
+            update_doc_field,
             3u128,
             Some(Proof::ProofV1 {
                 did: owner_did.clone(),
@@ -398,13 +395,12 @@ fn update_urauth_doc_works() {
         println!("");
         println!("{:?}", urauth_doc);
 
-        let update_field = UpdateDocField::MultiDID(WeightedDID {
+        let update_doc_field = UpdateDocField::MultiDID(WeightedDID {
             did: Charlie.to_account_id(),
             weight: 1,
         });
-        let mut update_doc_status = URAuthDocUpdateStatus::<Test>::get(&urauth_doc.id);
         urauth_doc
-            .update_doc(&mut update_doc_status, &update_field, 4)
+            .update_doc(update_doc_field.clone(), 4)
             .unwrap();
         let update_signature = urauth_helper.create_sr25519_signature(Alice, ProofType::Update(urauth_doc.clone(), owner_did.clone()));
         let ura_update_proof = Proof::ProofV1 {
@@ -414,24 +410,24 @@ fn update_urauth_doc_works() {
         assert_ok!(URAuth::update_urauth_doc(
             RuntimeOrigin::signed(Alice.to_account_id()),
             uri.clone(),
-            update_field,
+            update_doc_field,
             4,
             Some(Proof::ProofV1 {
                 did: owner_did.clone(),
                 proof: update_signature.into()
             })
         ));
-        println!("Before add => {:?}", urauth_doc);
-        urauth_doc.add_proof(ura_update_proof);
+        
+        println!("URAUTHDOC UPDATE STATUS => {:?}", URAuthDocUpdateStatus::<Test>::get(&urauth_doc.id));
         System::assert_has_event(
             URAuthEvent::UpdateInProgress {
                 urauth_doc: urauth_doc.clone(),
                 update_doc_status: UpdateDocStatus {
                     remaining_threshold: 1,
-                    status: UpdateStatus::InProgress(UpdateDocField::MultiDID(WeightedDID {
+                    status: UpdateStatus::InProgress { field: UpdateDocField::MultiDID(WeightedDID {
                         did: Charlie.to_account_id(),
                         weight: 1,
-                    })),
+                    }), proofs: Some(vec![ura_update_proof])},
                 },
             }
             .into(),
@@ -441,20 +437,19 @@ fn update_urauth_doc_works() {
         // Bob should sign for update.
         let mut urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
         println!("Document => {:?}", urauth_doc); 
-        let update_field = UpdateDocField::MultiDID(WeightedDID {
+        let update_doc_field = UpdateDocField::MultiDID(WeightedDID {
             did: Charlie.to_account_id(),
             weight: 1,
         });
-        let mut update_doc_status = URAuthDocUpdateStatus::<Test>::get(&urauth_doc.id);
         urauth_doc
-            .update_doc(&mut update_doc_status, &update_field, 4)
+            .update_doc(update_doc_field.clone(), 4)
             .unwrap();
         let bob_did = urauth_helper.generate_did(BOB_SS58);
         let update_signature = urauth_helper.create_sr25519_signature(Bob, ProofType::Update(urauth_doc.clone(), bob_did.as_bytes().to_vec()));
         assert_ok!(URAuth::update_urauth_doc(
             RuntimeOrigin::signed(Bob.to_account_id()),
             uri.clone(),
-            update_field,
+            update_doc_field,
             4,
             Some(Proof::ProofV1 {
                 did: bob_did.as_bytes().to_vec(),
