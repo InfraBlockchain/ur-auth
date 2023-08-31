@@ -52,24 +52,83 @@ pub mod pallet {
 
     #[pallet::storage]
     #[pallet::unbounded]
+    /// **Description:**
+    /// 
+    /// Store the `URAuthDoc` corresponding to the verified URI by Oracle nodes. 
+    /// The `URAuthDoc` contains definitions such as the DID of the owner for that URI and access permissions.
+    /// 
+    /// **Key:**
+    /// 
+    /// URI
+    /// 
+    /// **Value:**
+    /// 
+    /// URAuthDoc
     pub type URAuthTree<T: Config> = StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId>>;
 
     #[pallet::storage]
     #[pallet::unbounded]
+    /// **Description:**
+    /// 
+    /// Temporarily store the URIMetadata(owner_did and challenge_value) for the unverified URI in preparation for its verification.
+    /// 
+    /// **Key:**
+    /// 
+    /// URI
+    /// 
+    /// **Value:**
+    /// 
+    /// URIMetadata
     pub type URIMetadata<T: Config> = StorageMap<_, Twox128, URI, Metadata, OptionQuery>;
 
     #[pallet::storage]
     #[pallet::unbounded]
     #[pallet::getter(fn uri_verification_info)]
+    /// **Description:**
+    /// 
+    /// When validation is initiated by the Oracle node, store the submission status. 
+    /// For the requested URI, the Oracle node submits based on the Challenge Value and continues until it reaches a threshold value or higher.
+    /// 
+    /// **Key:**
+    /// 
+    /// URI
+    /// 
+    /// **Value:**
+    /// 
+    /// VerificationSubmission
     pub type URIVerificationInfo<T: Config> =
         StorageMap<_, Twox128, URI, VerificationSubmission<T>>;
 
     #[pallet::storage]
     #[pallet::unbounded]
+    /// **Description:**
+    /// 
+    /// A random Challenge value is stored for the requested URI. 
+    /// The Randomness consists of a random value of 32 bytes.
+    /// 
+    /// **Key:**
+    /// 
+    /// URI
+    /// 
+    /// **Value:**
+    /// 
+    /// schnorrkel::Randomness
     pub type ChallengeValue<T: Config> = StorageMap<_, Twox128, URI, Randomness>;
 
     #[pallet::storage]
     #[pallet::unbounded]
+    /// **Description:**
+    /// 
+    /// A random Challenge value is stored for the requested URI. 
+    /// The Randomness consists of a random value of 32 bytes.
+    /// 
+    /// **Key:**
+    /// 
+    /// DocId
+    /// 
+    /// **Value:**
+    /// 
+    /// UpdateDocStatus
     pub type URAuthDocUpdateStatus<T: Config> =
         StorageMap<_, Blake2_128Concat, DocId, UpdateDocStatus<T::AccountId>, ValueQuery>;
 
@@ -130,7 +189,7 @@ pub mod pallet {
             progress_status: VerificationSubmissionResult,
         },
         URAuthDocUpdated {
-            updated_field: UpdateDocField<T::AccountId>,
+            update_doc_field: UpdateDocField<T::AccountId>,
             urauth_doc: URAuthDoc<T::AccountId>,
         },
         UpdateInProgress {
@@ -245,20 +304,20 @@ pub mod pallet {
         pub fn update_urauth_doc(
             origin: OriginFor<T>,
             uri: URI,
-            update_field: UpdateDocField<T::AccountId>,
+            update_doc_field: UpdateDocField<T::AccountId>,
             updated_at: u128,
             proof: Option<Proof>,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
             let (mut updated_urauth_doc, mut update_doc_status) =
-                Self::try_update_urauth_doc(&uri, &update_field, updated_at)?;
+                Self::try_update_urauth_doc(&uri, &update_doc_field, updated_at, proof.clone())?;
             let (owner, proof) = Self::try_verify_urauth_doc_proof(&updated_urauth_doc, proof)?;
             Self::try_store_updated_urauth_doc(
                 owner,
                 proof,
                 &mut updated_urauth_doc,
                 &mut update_doc_status,
-                update_field,
+                update_doc_field,
             )?;
 
             Ok(())
@@ -354,6 +413,7 @@ impl<T: Config> Pallet<T> {
                 );
                 Counter::<T>::put(count);
                 URAuthTree::<T>::insert(&uri, urauth_doc.clone());
+                Self::remove_all_uri_related(uri.clone());
                 Self::deposit_event(Event::<T>::URAuthTreeRegistered {
                     count,
                     uri: uri.clone(),
@@ -408,18 +468,16 @@ impl<T: Config> Pallet<T> {
 
     fn try_update_urauth_doc(
         uri: &URI,
-        update_field: &UpdateDocField<T::AccountId>,
+        update_doc_field: &UpdateDocField<T::AccountId>,
         updated_at: u128,
+        maybe_proof: Option<Proof>
     ) -> Result<(URAuthDoc<T::AccountId>, UpdateDocStatus<T::AccountId>), DispatchError> {
+        let proof = maybe_proof.ok_or(Error::<T>::ProofMissing)?;
         let mut urauth_doc =
             URAuthTree::<T>::get(uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
         let mut update_doc_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id);
-        urauth_doc
-            .update_doc(&mut update_doc_status, &update_field, updated_at)
-            .map_err(|e| {
-                log::info!(" 🚨 Error on update urauth_doc {:?} 🚨", e);
-                Error::<T>::ErrorOnUpdateDoc
-            })?;
+        Self::do_try_update_doc(&mut urauth_doc, &mut update_doc_status, update_doc_field, updated_at, proof)?;
+        
         Ok((urauth_doc, update_doc_status))
     }
 
@@ -428,7 +486,7 @@ impl<T: Config> Pallet<T> {
         proof: Proof,
         urauth_doc: &mut URAuthDoc<T::AccountId>,
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
-        updated_field: UpdateDocField<T::AccountId>,
+        update_doc_field: UpdateDocField<T::AccountId>,
     ) -> Result<(), DispatchError> {
         let multi_did = urauth_doc.get_multi_did();
         let uri = urauth_doc.get_uri();
@@ -437,18 +495,21 @@ impl<T: Config> Pallet<T> {
             .get_did_weight(&account_id)
             .ok_or(Error::<T>::AccountMissing)?;
         let remaining_threshold = update_doc_status.remaining_threshold;
-        urauth_doc.add_proof(proof);
         if did_weight >= remaining_threshold {
             // Compelete
+            sp_std::if_std! { println!("Complete"); }
+            let proofs = update_doc_status.get_proofs();
+            urauth_doc.handle_proofs(proofs);
             URAuthTree::<T>::insert(uri, urauth_doc.clone());
             URAuthDocUpdateStatus::<T>::remove(urauth_doc.id);
             Pallet::<T>::deposit_event(Event::<T>::URAuthDocUpdated {
-                updated_field,
+                update_doc_field,
                 urauth_doc: urauth_doc.clone(),
             });
         } else {
             // InProgress
-            update_doc_status.handle_in_progress(did_weight, updated_field);
+            sp_std::if_std! { println!("InProgress!");}
+            update_doc_status.handle_in_progress(did_weight, update_doc_field, proof);
             URAuthDocUpdateStatus::<T>::insert(urauth_doc.id, update_doc_status.clone());
             Pallet::<T>::deposit_event(Event::<T>::UpdateInProgress {
                 urauth_doc: urauth_doc.clone(),
@@ -486,14 +547,14 @@ impl<T: Config> Pallet<T> {
         proof: Proof,
         urauth_doc: &mut URAuthDoc<T::AccountId>,
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
-        updated_field: UpdateDocField<T::AccountId>,
+        updated_doc_field: UpdateDocField<T::AccountId>,
     ) -> Result<(), DispatchError> {
         Self::handle_updated_urauth_doc(
             signer,
             proof,
             urauth_doc,
             update_doc_status,
-            updated_field,
+            updated_doc_field,
         )?;
 
         Ok(())
@@ -645,14 +706,72 @@ impl<T: Config> Pallet<T> {
 }
 
 impl<T: Config> Pallet<T> {
+
+    fn check_valid_updated_at(prev: u128, now: u128) -> bool {
+        prev <= now
+    }
+
+    fn handle_update_doc_status(
+        update_doc_status: &mut UpdateDocStatus<T::AccountId>,
+        update_doc_field: &UpdateDocField<T::AccountId>,
+        threshold: DIDWeight, 
+        proof: &Proof,
+    ) -> Result<(), DispatchError>{
+        match &update_doc_status.status {
+            UpdateStatus::Available => {
+                update_doc_status.handle_available(
+                    threshold, 
+                    update_doc_field.clone(),
+                    Some(vec![proof.clone()])
+                );
+            },
+            UpdateStatus::InProgress{ field, .. } => {
+                if field != update_doc_field {
+                    return Err(Error::<T>::ErrorOnUpdateDoc.into());
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn do_try_update_doc(
+        urauth_doc: &mut URAuthDoc<T::AccountId>,
+        update_doc_status: &mut UpdateDocStatus<T::AccountId>,
+        update_doc_field: &UpdateDocField<T::AccountId>,
+        updated_at: u128,
+        proof: Proof
+    ) -> Result<(), DispatchError> {
+
+        let prev_updated_at = urauth_doc.updated_at;
+        if !Self::check_valid_updated_at(prev_updated_at, updated_at) {
+            return Err(Error::<T>::ErrorOnUpdateDoc.into());
+        }
+        Self::handle_update_doc_status(
+            update_doc_status, 
+            update_doc_field, 
+            urauth_doc.get_threshold(), 
+            &proof
+        )?;
+
+        urauth_doc
+            .update_doc(update_doc_field)
+            .map_err(|e| {
+                log::warn!(" 🚨 Error on update urauth_doc {:?} 🚨", e);
+                Error::<T>::ErrorOnUpdateDoc
+            })?;
+
+        urauth_doc.set_updated_at(updated_at);
+
+        Ok(())
+    }
+
     pub fn get_updated_doc(
         uri: URI,
         update_field: UpdateDocField<T::AccountId>,
-        updated_at: u128,
     ) -> Option<URAuthDoc<T::AccountId>> {
         if let Some(mut urauth_doc) = URAuthTree::<T>::get(&uri) {
-            let mut update_doc_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id);
-            match urauth_doc.update_doc(&mut update_doc_status, &update_field, updated_at) {
+            match urauth_doc.update_doc(&update_field) {
                 Ok(_) => Some(urauth_doc.clone()),
                 Err(_) => None,
             }

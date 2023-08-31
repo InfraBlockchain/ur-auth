@@ -421,7 +421,7 @@ fn update_urauth_doc_works() {
                 proof: update_signature.into()
             })
         ));
-
+        println!("Before add => {:?}", urauth_doc);
         urauth_doc.add_proof(ura_update_proof);
         System::assert_has_event(
             URAuthEvent::UpdateInProgress {
@@ -440,6 +440,7 @@ fn update_urauth_doc_works() {
         // Since threhold is 2, URAUTH Document has not been updated.
         // Bob should sign for update.
         let mut urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
+        println!("Document => {:?}", urauth_doc); 
         let update_field = UpdateDocField::MultiDID(WeightedDID {
             did: Charlie.to_account_id(),
             weight: 1,
@@ -462,6 +463,14 @@ fn update_urauth_doc_works() {
         ));
 
         let urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
+        let proofs = urauth_doc.clone().proofs.unwrap();
+        for proof in proofs {
+            match proof {
+                Proof::ProofV1 { did, .. } => {
+                    println!("{:?}", String::from_utf8_lossy(&did));
+                }
+            }
+        }
         assert!(urauth_doc.clone().proofs.unwrap().len() == 2);
         println!("");
         println!("AFTER UPDATE DID OWNERS: ADD CHARILE");

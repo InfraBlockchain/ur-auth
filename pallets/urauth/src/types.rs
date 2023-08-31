@@ -386,6 +386,14 @@ where
         }
     }
 
+    pub fn get_threshold(&self) -> DIDWeight {
+        self.multi_owner_did.threshold
+    }
+
+    pub fn set_updated_at(&mut self, updated_at: u128) {
+        self.updated_at = updated_at;
+    }
+
     pub fn get_uri(&self) -> URI {
         self.uri.clone()
     }
@@ -394,13 +402,9 @@ where
         self.multi_owner_did.clone()
     }
 
-    pub fn remove_all_prev_proofs(&mut self) {
-        self.proofs = Some(Vec::new());
-    }
-
-    fn check_valid_updated_at(&self, now: u128) -> bool {
-        let prev = self.updated_at;
-        prev <= now
+    pub fn handle_proofs(&mut self, proofs: Option<Vec<Proof>>) {
+        self.remove_all_prev_proofs();
+        self.proofs = proofs;
     }
 
     pub fn add_proof(&mut self, proof: Proof) {
@@ -414,27 +418,9 @@ where
 
     pub fn update_doc(
         &mut self,
-        update_doc_status: &mut UpdateDocStatus<Account>,
-        update_field: &UpdateDocField<Account>,
-        updated_at: u128,
+        update_doc_field: &UpdateDocField<Account>,
     ) -> Result<(), URAuthDocUpdateError> {
-        match &update_doc_status.status {
-            UpdateStatus::Available => {
-                let current_threshold = self.multi_owner_did.get_threshold();
-                update_doc_status.set_remaining_threshold(current_threshold);
-                self.remove_all_prev_proofs();
-            }
-            UpdateStatus::InProgress(field) => {
-                if field != update_field {
-                    return Err(URAuthDocUpdateError::UpdateInProgress);
-                }
-            }
-        }
-        if !self.check_valid_updated_at(updated_at) {
-            return Err(URAuthDocUpdateError::InvalidUpdateAt);
-        }
-        self.updated_at = updated_at;
-        match update_field.clone() {
+        match update_doc_field.clone() {
             UpdateDocField::MultiDID(weighted_did) => {
                 self.multi_owner_did.add_owner(weighted_did);
             }
@@ -461,6 +447,10 @@ where
 
         Ok(())
     }
+
+    fn remove_all_prev_proofs(&mut self) {
+        self.proofs = Some(Vec::new());
+    }
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
@@ -473,9 +463,9 @@ pub enum UpdateDocField<Account> {
     AccessRules(Option<Vec<AccessRule>>),
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum UpdateStatus<Account> {
-    InProgress(UpdateDocField<Account>),
+    InProgress { field: UpdateDocField<Account>, proofs: Option<Vec<Proof>> },
     Available,
 }
 
@@ -494,30 +484,62 @@ impl<Account> Default for UpdateDocStatus<Account> {
     }
 }
 
-impl<Account> UpdateDocStatus<Account> {
+impl<Account: Clone> UpdateDocStatus<Account> {
     pub fn is_update_available(&self) -> bool {
         matches!(self.status, UpdateStatus::Available)
-    }
-
-    pub fn handle_in_progress(
-        &mut self,
-        did_weight: DIDWeight,
-        updated_field: UpdateDocField<Account>,
-    ) {
-        self.calc_remaining_threshold(did_weight);
-        self.status_to_in_progress(updated_field);
     }
 
     pub fn set_remaining_threshold(&mut self, threshold: DIDWeight) {
         self.remaining_threshold = threshold;
     }
 
+    pub fn handle_available(&mut self, threshold: DIDWeight, field: UpdateDocField<Account>, proofs: Option<Vec<Proof>>) {
+        self.set_remaining_threshold(threshold);
+        self.in_progress(field, proofs);
+    }
+
+    pub fn handle_in_progress(
+        &mut self,
+        did_weight: DIDWeight,
+        update_doc_field: UpdateDocField<Account>,
+        proof: Proof
+    ) {
+        let maybe_proofs = self.add_proof(proof);
+        self.calc_remaining_threshold(did_weight);
+        self.in_progress(update_doc_field, maybe_proofs);
+    }
+
+    pub fn get_proofs(&self) -> Option<Vec<Proof>> {
+        match self.status.clone() {
+            UpdateStatus::InProgress { proofs, .. } => {
+                proofs
+            },
+            _ => { None }
+        }
+    }
+
+    fn add_proof(&mut self, proof: Proof) -> Option<Vec<Proof>> {
+        let maybe_proofs = match self.status.clone() {
+            UpdateStatus::InProgress { proofs, .. } => {
+                let mut ps = if let Some(proofs) = proofs {
+                    proofs
+                } else {
+                    Default::default()
+                };
+                ps.push(proof);
+                Some(ps)
+            },
+            _ => { None }
+        };
+        maybe_proofs
+    }
+
     fn calc_remaining_threshold(&mut self, did_weight: DIDWeight) {
         self.remaining_threshold = self.remaining_threshold.saturating_sub(did_weight);
     }
 
-    fn status_to_in_progress(&mut self, updated_field: UpdateDocField<Account>) {
-        self.status = UpdateStatus::InProgress(updated_field);
+    fn in_progress(&mut self, field: UpdateDocField<Account>, proofs: Option<Vec<Proof>>) {
+        self.status = UpdateStatus::InProgress{ field , proofs }
     }
 }
 
