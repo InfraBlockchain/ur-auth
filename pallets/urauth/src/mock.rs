@@ -2,7 +2,7 @@
 pub use crate::{self as pallet_urauth, *};
 use frame_support::{parameter_types, traits::Everything};
 use frame_system::EnsureRoot;
-use sp_core::H256;
+use sp_core::{H256, sr25519::Signature};
 use sp_runtime::{
     testing::Header,
     traits::{BlakeTwo256, IdentityLookup},
@@ -94,75 +94,86 @@ pub struct ExtBuilder {
     pub oracle_member_count: u32,
 }
 
-pub struct MockURAuthHelper<Account: Encode> {
+pub struct MockURAuthHelper<Account> {
     pub mock_doc_manager: MockURAuthDocManager,
     pub mock_prover: MockProver<Account>,
 }
 
-impl<Account: Encode>MockURAuthHelper<Account> {
+impl<Account: Encode> MockURAuthHelper<Account> {
     pub fn default(
         uri: Option<String>, 
         account_id: Option<String>, 
         timestamp: Option<String>, 
         challenge_value: Option<String>,
     ) -> Self {
+        let account_id = account_id.map_or(String::from(ALICE_SS58), |id| id);
         Self {
             mock_doc_manager: MockURAuthDocManager::new(
                 uri.map_or(String::from("www.website1.com"), |uri| uri), 
-                account_id.map_or(String::from(ALICE_SS58), |id| id), 
+                format!("{}{}", "did:infra:ua:", account_id),
                 challenge_value.map_or(String::from("E40Bzg8kAvOIjswwxc29WaQCHuOKwoZC"), |cv| cv), 
                 timestamp.map_or(String::from("2023-07-28T10:17:21Z"), |t| t), 
                 None, 
                 None
             ),
-            mock_prover: MockProver { proof_type: None }
+            mock_prover: MockProver(Default::default())
         }
     }
 
-    pub fn deconstruct_urauth_doc(&self) -> (URI, String, String, String) {
+    pub fn deconstruct_urauth_doc(&self) -> (URI, Vec<u8>, Vec<u8>, Vec<u8>) {
         self.mock_doc_manager.deconstruct()
     }
 
-    pub fn set_proof_type(&mut self, proof_type: Option<ProofType<Account>>) {
-        self.mock_prover.set_proof_type(proof_type);
+    pub fn create_raw_payload(&mut self, proof_type: ProofType<Account>) -> Vec<u8> {
+        self.mock_prover.raw_payload(proof_type)
     }
 
-    pub fn create_raw_payload(&self) -> Vec<u8> {
-        self.mock_prover.raw_payload()
+    pub fn create_sr25519_signature(&mut self, signer: sp_keyring::AccountKeyring, proof_type: ProofType<Account>) -> Signature {
+        self.mock_prover.create_sr25519_signature(signer, proof_type)
     }
 
-    pub fn create_signature(&self, signer: sp_keyring::AccountKeyring) -> MultiSignature {
-        self.mock_prover.create_signature(signer)
+    pub fn create_signature(&mut self, signer: sp_keyring::AccountKeyring, proof_type: ProofType<Account>) -> MultiSignature {
+        self.mock_prover.create_signature(signer, proof_type)
     }
 
     pub fn to_uri(&self) -> URI {
         self.mock_doc_manager.to_uri()
     }
 
-    pub fn generate_json(&self) -> String {
-        self.mock_doc_manager.generate_json()
+    pub fn owner_did(&self) -> String {
+        self.mock_doc_manager.owner_did.clone()
+    }
+
+    pub fn raw_owner_did(&self) -> Vec<u8> {
+        self.mock_doc_manager.owner_did.as_bytes().to_vec()
+    } 
+
+    pub fn challenge_value(&self) -> Randomness {
+        self.mock_doc_manager.challenge_value.as_bytes().to_vec()[..].try_into().unwrap()
+    }
+
+    pub fn generate_did(&self, account_id: &str) -> String {
+        format!("{}{}", "did:infra:ua:", account_id)
+    }
+
+    pub fn generate_json(&mut self, proof_type: String, proof: String) -> Vec<u8> {
+        self.mock_doc_manager.generate_json(proof_type, proof).as_bytes().to_vec()
     }
 }
 
+#[derive(Clone)]
 pub enum ProofType<Account: Encode> {
     Request(URI, OwnerDID),
     Challenge(URI, OwnerDID, Vec<u8>, Vec<u8>),
     Update(URAuthDoc<Account>, Vec<u8>)
 }
 
-pub struct MockProver<Account: Encode> {
-    pub proof_type: Option<ProofType<Account>>
-}
+pub struct MockProver<Account>(PhantomData<Account>);
 
 impl<Account: Encode> MockProver<Account> {
 
-    fn set_proof_type(&mut self, proof_type: Option<ProofType<Account>>) {
-        self.proof_type = proof_type;
-    }
-
-    fn raw_payload(&self) -> Vec<u8> {
-
-        match self.proof_type.as_ref().expect("Proof type missing!") {
+    fn raw_payload(&mut self, proof_type: ProofType<Account>) -> Vec<u8> {
+        let raw = match proof_type {
             ProofType::Request(uri, owner_did) => {
                 (uri, owner_did).encode()
             },
@@ -197,11 +208,22 @@ impl<Account: Encode> MockProver<Account> {
                 )
                     .encode()
             }
+        };
+
+        if raw.len() > 256 {
+            sp_io::hashing::blake2_256(&raw).to_vec()
+        } else {
+            raw
         }
     }
 
-    fn create_signature(&self, signer: sp_keyring::AccountKeyring) -> MultiSignature {
-        let raw_payload = self.raw_payload();
+    fn create_sr25519_signature(&mut self, signer: sp_keyring::AccountKeyring, proof_type: ProofType<Account>) -> Signature {
+        let raw_payload = self.raw_payload(proof_type);
+        signer.sign(&raw_payload)
+    }
+
+    fn create_signature(&mut self, signer: sp_keyring::AccountKeyring, proof_type: ProofType<Account>) -> MultiSignature {
+        let raw_payload = self.raw_payload(proof_type);
         let sig = signer.sign(&raw_payload);
         sig.into()
     }
@@ -218,8 +240,7 @@ pub struct MockURAuthDocManager {
 
 impl MockURAuthDocManager {
 
-    pub fn new(uri: String, account_id: String, challenge_value: String, timestamp: String, proof_type: Option<String>, proof: Option<String>) -> Self {
-        let owner_did = MockURAuthDocManager::generate_did(account_id.as_str());
+    pub fn new(uri: String, owner_did: String, challenge_value: String, timestamp: String, proof_type: Option<String>, proof: Option<String>) -> Self {
         Self {
             uri,
             owner_did,
@@ -234,9 +255,9 @@ impl MockURAuthDocManager {
         URI(self.uri.as_bytes().to_vec())
     }
 
-    fn deconstruct(&self) -> (URI, String, String, String) {
+    fn deconstruct(&self) -> (URI, Vec<u8>, Vec<u8>, Vec<u8>) {
         let uri = self.to_uri();
-        (uri, self.owner_did.clone(), self.challenge_value.clone(), self.timestamp.clone())
+        (uri, self.owner_did.as_bytes().to_vec(), self.challenge_value.as_bytes().to_vec(), self.timestamp.as_bytes().to_vec())
     }
 
     fn challenge_value(&mut self, proof_type: String, proof: String) {
@@ -244,12 +265,9 @@ impl MockURAuthDocManager {
         self.proof = Some(proof);
     }
 
-    fn generate_did(account_id: &str) -> String {
-        format!("{}{}", "did:infra:ua:", account_id)
-    }
-
-    fn generate_json(&self) -> String {
+    fn generate_json(&mut self, proof_type: String, proof: String) -> String {
         use lite_json::Serialize;
+        self.challenge_value(proof_type, proof);
     
         let mut object_elements = vec![];
     

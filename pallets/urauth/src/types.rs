@@ -361,7 +361,7 @@ pub struct URAuthDoc<Account> {
     pub content_metadata: Option<ContentMetadata>,
     pub copyright_info: Option<CopyrightInfo>,
     pub access_rules: Option<Vec<AccessRule>>,
-    proofs: Option<Vec<Proof>>,
+    pub proofs: Option<Vec<Proof>>,
 }
 
 impl<Account> URAuthDoc<Account>
