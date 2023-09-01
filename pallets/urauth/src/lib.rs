@@ -53,31 +53,31 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::unbounded]
     /// **Description:**
-    /// 
-    /// Store the `URAuthDoc` corresponding to the verified URI by Oracle nodes. 
+    ///
+    /// Store the `URAuthDoc` corresponding to the verified URI by Oracle nodes.
     /// The `URAuthDoc` contains definitions such as the DID of the owner for that URI and access permissions.
-    /// 
+    ///
     /// **Key:**
-    /// 
+    ///
     /// URI
-    /// 
+    ///
     /// **Value:**
-    /// 
+    ///
     /// URAuthDoc
     pub type URAuthTree<T: Config> = StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId>>;
 
     #[pallet::storage]
     #[pallet::unbounded]
     /// **Description:**
-    /// 
+    ///
     /// Temporarily store the URIMetadata(owner_did and challenge_value) for the unverified URI in preparation for its verification.
-    /// 
+    ///
     /// **Key:**
-    /// 
+    ///
     /// URI
-    /// 
+    ///
     /// **Value:**
-    /// 
+    ///
     /// URIMetadata
     pub type URIMetadata<T: Config> = StorageMap<_, Twox128, URI, Metadata, OptionQuery>;
 
@@ -85,16 +85,16 @@ pub mod pallet {
     #[pallet::unbounded]
     #[pallet::getter(fn uri_verification_info)]
     /// **Description:**
-    /// 
-    /// When validation is initiated by the Oracle node, store the submission status. 
+    ///
+    /// When validation is initiated by the Oracle node, store the submission status.
     /// For the requested URI, the Oracle node submits based on the Challenge Value and continues until it reaches a threshold value or higher.
-    /// 
+    ///
     /// **Key:**
-    /// 
+    ///
     /// URI
-    /// 
+    ///
     /// **Value:**
-    /// 
+    ///
     /// VerificationSubmission
     pub type URIVerificationInfo<T: Config> =
         StorageMap<_, Twox128, URI, VerificationSubmission<T>>;
@@ -102,32 +102,32 @@ pub mod pallet {
     #[pallet::storage]
     #[pallet::unbounded]
     /// **Description:**
-    /// 
-    /// A random Challenge value is stored for the requested URI. 
+    ///
+    /// A random Challenge value is stored for the requested URI.
     /// The Randomness consists of a random value of 32 bytes.
-    /// 
+    ///
     /// **Key:**
-    /// 
+    ///
     /// URI
-    /// 
+    ///
     /// **Value:**
-    /// 
+    ///
     /// schnorrkel::Randomness
     pub type ChallengeValue<T: Config> = StorageMap<_, Twox128, URI, Randomness>;
 
     #[pallet::storage]
     #[pallet::unbounded]
     /// **Description:**
-    /// 
-    /// A random Challenge value is stored for the requested URI. 
+    ///
+    /// A random Challenge value is stored for the requested URI.
     /// The Randomness consists of a random value of 32 bytes.
-    /// 
+    ///
     /// **Key:**
-    /// 
+    ///
     /// DocId
-    /// 
+    ///
     /// **Value:**
-    /// 
+    ///
     /// UpdateDocStatus
     pub type URAuthDocUpdateStatus<T: Config> =
         StorageMap<_, Blake2_128Concat, DocId, UpdateDocStatus<T::AccountId>, ValueQuery>;
@@ -153,9 +153,9 @@ pub mod pallet {
     #[cfg(feature = "std")]
     impl<T: Config> Default for GenesisConfig<T> {
         fn default() -> Self {
-            GenesisConfig { 
-                oracle_members: Default::default(), 
-                challenge_value_config: Default::default() 
+            GenesisConfig {
+                oracle_members: Default::default(),
+                challenge_value_config: Default::default(),
             }
         }
     }
@@ -163,7 +163,11 @@ pub mod pallet {
     #[pallet::genesis_build]
     impl<T: Config> GenesisBuild<T> for GenesisConfig<T> {
         fn build(&self) {
-            let oracle_members: BoundedVec<T::AccountId, T::MaxOracleMembers> = self.oracle_members.clone().try_into().expect("Max Oracle members reached!");
+            let oracle_members: BoundedVec<T::AccountId, T::MaxOracleMembers> = self
+                .oracle_members
+                .clone()
+                .try_into()
+                .expect("Max Oracle members reached!");
             OracleMembers::<T>::put(oracle_members);
             URAuthConfig::<T>::put(self.challenge_value_config.clone());
         }
@@ -471,14 +475,19 @@ impl<T: Config> Pallet<T> {
         uri: &URI,
         update_doc_field: &UpdateDocField<T::AccountId>,
         updated_at: u128,
-        maybe_proof: Option<Proof>
+        maybe_proof: Option<Proof>,
     ) -> Result<(URAuthDoc<T::AccountId>, UpdateDocStatus<T::AccountId>), DispatchError> {
         let _ = maybe_proof.ok_or(Error::<T>::ProofMissing)?;
         let mut urauth_doc =
             URAuthTree::<T>::get(uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
         let mut update_doc_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id);
-        Self::do_try_update_doc(&mut urauth_doc, &mut update_doc_status, update_doc_field, updated_at)?;
-        
+        Self::do_try_update_doc(
+            &mut urauth_doc,
+            &mut update_doc_status,
+            update_doc_field,
+            updated_at,
+        )?;
+
         Ok((urauth_doc, update_doc_status))
     }
 
@@ -496,7 +505,9 @@ impl<T: Config> Pallet<T> {
             .get_did_weight(&account_id)
             .ok_or(Error::<T>::AccountMissing)?;
         let remaining_threshold = update_doc_status.remaining_threshold;
-        update_doc_status.handle_in_progress(did_weight, update_doc_field.clone(), proof).map_err(|_| Error::<T>::ErrorOnUpdateDocStatus)?;
+        update_doc_status
+            .handle_in_progress(did_weight, update_doc_field.clone(), proof)
+            .map_err(|_| Error::<T>::ErrorOnUpdateDocStatus)?;
         if did_weight >= remaining_threshold {
             let new_proofs = update_doc_status.get_proofs();
             urauth_doc.handle_proofs(new_proofs);
@@ -703,7 +714,6 @@ impl<T: Config> Pallet<T> {
 }
 
 impl<T: Config> Pallet<T> {
-
     fn check_valid_updated_at(prev: u128, now: u128) -> bool {
         prev <= now
     }
@@ -711,16 +721,13 @@ impl<T: Config> Pallet<T> {
     fn handle_update_doc_status(
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
         update_doc_field: &UpdateDocField<T::AccountId>,
-        threshold: DIDWeight, 
-    ) -> Result<(), DispatchError>{
+        threshold: DIDWeight,
+    ) -> Result<(), DispatchError> {
         match &update_doc_status.status {
             UpdateStatus::Available => {
-                update_doc_status.handle_available(
-                    threshold, 
-                    update_doc_field.clone()
-                );
-            },
-            UpdateStatus::InProgress{ field, .. } => {
+                update_doc_status.handle_available(threshold, update_doc_field.clone());
+            }
+            UpdateStatus::InProgress { field, .. } => {
                 if field != update_doc_field {
                     return Err(Error::<T>::ErrorOnUpdateDoc.into());
                 }
@@ -734,17 +741,16 @@ impl<T: Config> Pallet<T> {
         urauth_doc: &mut URAuthDoc<T::AccountId>,
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
         update_doc_field: &UpdateDocField<T::AccountId>,
-        updated_at: u128
+        updated_at: u128,
     ) -> Result<(), DispatchError> {
-
         let prev_updated_at = urauth_doc.updated_at;
         if !Self::check_valid_updated_at(prev_updated_at, updated_at) {
             return Err(Error::<T>::ErrorOnUpdateDoc.into());
         }
         Self::handle_update_doc_status(
-            update_doc_status, 
-            update_doc_field, 
-            urauth_doc.get_threshold()
+            update_doc_status,
+            update_doc_field,
+            urauth_doc.get_threshold(),
         )?;
 
         urauth_doc

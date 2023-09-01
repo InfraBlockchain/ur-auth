@@ -2,10 +2,10 @@ use super::*;
 
 use codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
+#[cfg(feature = "std")]
+use serde::{Deserialize, Serialize};
 use sp_runtime::RuntimeDebug;
 use sp_std::collections::btree_map::BTreeMap;
-#[cfg(feature = "std")]
-use serde::{Serialize, Deserialize};
 
 pub type DIDWeight = u16;
 pub type OwnerDID = Vec<u8>;
@@ -415,7 +415,7 @@ where
     pub fn update_doc(
         &mut self,
         update_doc_field: UpdateDocField<Account>,
-        updated_at: u128
+        updated_at: u128,
     ) -> Result<(), URAuthDocUpdateError> {
         self.updated_at = updated_at;
         match update_doc_field {
@@ -463,7 +463,10 @@ pub enum UpdateDocField<Account> {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum UpdateStatus<Account> {
-    InProgress { field: UpdateDocField<Account>, proofs: Option<Vec<Proof>> },
+    InProgress {
+        field: UpdateDocField<Account>,
+        proofs: Option<Vec<Proof>>,
+    },
     Available,
 }
 
@@ -491,7 +494,11 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         self.remaining_threshold = threshold;
     }
 
-    pub fn handle_available(&mut self, threshold: DIDWeight, update_doc_field: UpdateDocField<Account>) {
+    pub fn handle_available(
+        &mut self,
+        threshold: DIDWeight,
+        update_doc_field: UpdateDocField<Account>,
+    ) {
         self.set_remaining_threshold(threshold);
         self.in_progress(update_doc_field, None);
     }
@@ -500,13 +507,13 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         &mut self,
         did_weight: DIDWeight,
         update_doc_field: UpdateDocField<Account>,
-        proof: Proof
+        proof: Proof,
     ) -> Result<(), UpdateDocStatusError> {
         if let Some(proofs) = self.add_proof(proof) {
             self.calc_remaining_threshold(did_weight);
             self.in_progress(update_doc_field, Some(proofs));
         } else {
-            return Err(UpdateDocStatusError::ProofMissing.into())
+            return Err(UpdateDocStatusError::ProofMissing.into());
         }
 
         Ok(())
@@ -514,10 +521,8 @@ impl<Account: Clone> UpdateDocStatus<Account> {
 
     pub fn get_proofs(&self) -> Option<Vec<Proof>> {
         match self.status.clone() {
-            UpdateStatus::InProgress { proofs, .. } => {
-                proofs
-            },
-            _ => { None }
+            UpdateStatus::InProgress { proofs, .. } => proofs,
+            _ => None,
         }
     }
 
@@ -531,8 +536,8 @@ impl<Account: Clone> UpdateDocStatus<Account> {
                 };
                 ps.push(proof);
                 Some(ps)
-            },
-            _ => { None }
+            }
+            _ => None,
         };
         maybe_proofs
     }
@@ -542,7 +547,7 @@ impl<Account: Clone> UpdateDocStatus<Account> {
     }
 
     fn in_progress(&mut self, field: UpdateDocField<Account>, proofs: Option<Vec<Proof>>) {
-        self.status = UpdateStatus::InProgress{ field , proofs }
+        self.status = UpdateStatus::InProgress { field, proofs }
     }
 }
 
@@ -570,14 +575,14 @@ impl sp_runtime::traits::Printable for URAuthDocUpdateError {
 /// Errors that may happen on offence reports.
 #[derive(PartialEq, sp_runtime::RuntimeDebug)]
 pub enum UpdateDocStatusError {
-    ProofMissing
+    ProofMissing,
 }
 
 impl sp_runtime::traits::Printable for UpdateDocStatusError {
     fn print(&self) {
         "UpdateDocStatusError".print();
         match self {
-            Self::ProofMissing => "PrrofMissingOnUpdate".print()
+            Self::ProofMissing => "PrrofMissingOnUpdate".print(),
         }
     }
 }

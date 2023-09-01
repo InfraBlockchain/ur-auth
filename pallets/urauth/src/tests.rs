@@ -1,17 +1,8 @@
-
-pub use crate::{
-    *,
-    self as pallet_urauth, 
-    Event as URAuthEvent, 
-    mock::*,
-};
+pub use crate::{self as pallet_urauth, mock::*, Event as URAuthEvent, *};
 
 use frame_support::{assert_noop, assert_ok};
 use sp_keyring::AccountKeyring::*;
-use sp_runtime::{
-    traits::BlakeTwo256,
-    AccountId32, MultiSigner,
-};
+use sp_runtime::{traits::BlakeTwo256, AccountId32, MultiSigner};
 
 fn find_json_value(
     json_object: lite_json::JsonObject,
@@ -152,7 +143,10 @@ fn urauth_request_register_domain_owner_works() {
     let signer = MultiSigner::Sr25519(Alice.public());
     let signature = urauth_helper.create_signature(
         Alice,
-        ProofType::Request(URI("www.website1.com".into()), urauth_helper.raw_owner_did())
+        ProofType::Request(
+            URI("www.website1.com".into()),
+            urauth_helper.raw_owner_did(),
+        ),
     );
     new_test_ext().execute_with(|| {
         assert_ok!(URAuth::urauth_request_register_domain_owner(
@@ -166,8 +160,8 @@ fn urauth_request_register_domain_owner_works() {
 
         let metadata = URIMetadata::<Test>::get(&uri).unwrap();
         assert!(
-            String::from_utf8_lossy(&metadata.owner_did) == urauth_helper.owner_did() &&
-            metadata.challenge_value == urauth_helper.challenge_value()
+            String::from_utf8_lossy(&metadata.owner_did) == urauth_helper.owner_did()
+                && metadata.challenge_value == urauth_helper.challenge_value()
         );
         System::assert_has_event(URAuthEvent::URAuthRegisterRequested { uri: uri.clone() }.into());
 
@@ -186,8 +180,10 @@ fn urauth_request_register_domain_owner_works() {
 
         let signature2 = urauth_helper.create_signature(
             Alice,
-            ProofType::Request(URI::new("www.website.com".into()), 
-            urauth_helper.raw_owner_did())
+            ProofType::Request(
+                URI::new("www.website.com".into()),
+                urauth_helper.raw_owner_did(),
+            ),
         );
 
         // Different URI with signature should fail
@@ -204,11 +200,11 @@ fn urauth_request_register_domain_owner_works() {
         );
 
         let signature3 = urauth_helper.create_signature(
-            Bob, 
+            Bob,
             ProofType::Request(
-                URI::new("www.website1.com".into()), 
-                urauth_helper.generate_did(BOB_SS58).as_bytes().to_vec()
-            )
+                URI::new("www.website1.com".into()),
+                urauth_helper.generate_did(BOB_SS58).as_bytes().to_vec(),
+            ),
         );
         assert_noop!(
             URAuth::urauth_request_register_domain_owner(
@@ -229,19 +225,15 @@ fn verify_challenge_works() {
     let mut urauth_helper = MockURAuthHelper::<MockAccountId>::default(None, None, None, None);
     let (uri, owner_did, challenge_value, timestamp) = urauth_helper.deconstruct_urauth_doc();
     let request_sig = urauth_helper.create_signature(
-        Alice, 
-        ProofType::Request(uri.clone(), urauth_helper.raw_owner_did())
+        Alice,
+        ProofType::Request(uri.clone(), urauth_helper.raw_owner_did()),
     );
     let challenge_sig = urauth_helper.create_sr25519_signature(
-        Alice, 
-        ProofType::Challenge(
-            uri.clone(), 
-            owner_did.clone(),
-            challenge_value,
-            timestamp
-        )
+        Alice,
+        ProofType::Challenge(uri.clone(), owner_did.clone(), challenge_value, timestamp),
     );
-    let challenge_value = urauth_helper.generate_json("Sr25519Signature2020".into(), hex::encode(challenge_sig));
+    let challenge_value =
+        urauth_helper.generate_json("Sr25519Signature2020".into(), hex::encode(challenge_sig));
     new_test_ext().execute_with(|| {
         assert_ok!(URAuth::add_oracle_member(
             RuntimeOrigin::root(),
@@ -278,15 +270,19 @@ fn verify_challenge_works() {
 fn update_urauth_doc_works() {
     let mut urauth_helper = MockURAuthHelper::<MockAccountId>::default(None, None, None, None);
     let (uri, owner_did, challenge_value, timestamp) = urauth_helper.deconstruct_urauth_doc();
-    let request_sig = urauth_helper.create_signature(
-        Alice,
-        ProofType::Request(uri.clone(), owner_did.clone()),
-    );
+    let request_sig =
+        urauth_helper.create_signature(Alice, ProofType::Request(uri.clone(), owner_did.clone()));
     let challenge_sig = urauth_helper.create_sr25519_signature(
         Alice,
-        ProofType::Challenge(uri.clone(), owner_did.clone(), challenge_value.clone(), timestamp.clone()) 
+        ProofType::Challenge(
+            uri.clone(),
+            owner_did.clone(),
+            challenge_value.clone(),
+            timestamp.clone(),
+        ),
     );
-    let challenge_value = urauth_helper.generate_json("Sr25519Signature2020".into(), hex::encode(challenge_sig));
+    let challenge_value =
+        urauth_helper.generate_json("Sr25519Signature2020".into(), hex::encode(challenge_sig));
     new_test_ext().execute_with(|| {
         assert_ok!(URAuth::add_oracle_member(
             RuntimeOrigin::root(),
@@ -328,10 +324,11 @@ fn update_urauth_doc_works() {
                 disallow: vec![ContentType::Video, ContentType::Code],
             }],
         }]));
-        urauth_doc
-            .update_doc(update_doc_field.clone(), 1)
-            .unwrap();
-        let update_signature = urauth_helper.create_sr25519_signature(Alice, ProofType::Update(urauth_doc.clone(), owner_did.clone()));
+        urauth_doc.update_doc(update_doc_field.clone(), 1).unwrap();
+        let update_signature = urauth_helper.create_sr25519_signature(
+            Alice,
+            ProofType::Update(urauth_doc.clone(), owner_did.clone()),
+        );
         assert_ok!(URAuth::update_urauth_doc(
             RuntimeOrigin::signed(Alice.to_account_id()),
             uri.clone(),
@@ -352,10 +349,11 @@ fn update_urauth_doc_works() {
             did: Bob.to_account_id(),
             weight: 1,
         });
-        urauth_doc
-            .update_doc( update_doc_field.clone(), 2)
-            .unwrap();
-        let update_signature = urauth_helper.create_sr25519_signature(Alice, ProofType::Update(urauth_doc.clone(), owner_did.clone()));
+        urauth_doc.update_doc(update_doc_field.clone(), 2).unwrap();
+        let update_signature = urauth_helper.create_sr25519_signature(
+            Alice,
+            ProofType::Update(urauth_doc.clone(), owner_did.clone()),
+        );
         assert_ok!(URAuth::update_urauth_doc(
             RuntimeOrigin::signed(Alice.to_account_id()),
             uri.clone(),
@@ -374,10 +372,11 @@ fn update_urauth_doc_works() {
         println!("{:?}", urauth_doc);
 
         let update_doc_field = UpdateDocField::<MockAccountId>::Threshold(2);
-        urauth_doc
-            .update_doc(update_doc_field.clone(), 3)
-            .unwrap();
-        let update_signature = urauth_helper.create_sr25519_signature(Alice, ProofType::Update(urauth_doc.clone(), owner_did.clone()));
+        urauth_doc.update_doc(update_doc_field.clone(), 3).unwrap();
+        let update_signature = urauth_helper.create_sr25519_signature(
+            Alice,
+            ProofType::Update(urauth_doc.clone(), owner_did.clone()),
+        );
         assert_ok!(URAuth::update_urauth_doc(
             RuntimeOrigin::signed(Alice.to_account_id()),
             uri.clone(),
@@ -399,10 +398,11 @@ fn update_urauth_doc_works() {
             did: Charlie.to_account_id(),
             weight: 1,
         });
-        urauth_doc
-            .update_doc(update_doc_field.clone(), 4)
-            .unwrap();
-        let update_signature = urauth_helper.create_sr25519_signature(Alice, ProofType::Update(urauth_doc.clone(), owner_did.clone()));
+        urauth_doc.update_doc(update_doc_field.clone(), 4).unwrap();
+        let update_signature = urauth_helper.create_sr25519_signature(
+            Alice,
+            ProofType::Update(urauth_doc.clone(), owner_did.clone()),
+        );
         let ura_update_proof = Proof::ProofV1 {
             did: owner_did.clone(),
             proof: update_signature.clone().into(),
@@ -417,17 +417,23 @@ fn update_urauth_doc_works() {
                 proof: update_signature.into()
             })
         ));
-        
-        println!("URAUTHDOC UPDATE STATUS => {:?}", URAuthDocUpdateStatus::<Test>::get(&urauth_doc.id));
+
+        println!(
+            "URAUTHDOC UPDATE STATUS => {:?}",
+            URAuthDocUpdateStatus::<Test>::get(&urauth_doc.id)
+        );
         System::assert_has_event(
             URAuthEvent::UpdateInProgress {
                 urauth_doc: urauth_doc.clone(),
                 update_doc_status: UpdateDocStatus {
                     remaining_threshold: 1,
-                    status: UpdateStatus::InProgress { field: UpdateDocField::MultiDID(WeightedDID {
-                        did: Charlie.to_account_id(),
-                        weight: 1,
-                    }), proofs: Some(vec![ura_update_proof])},
+                    status: UpdateStatus::InProgress {
+                        field: UpdateDocField::MultiDID(WeightedDID {
+                            did: Charlie.to_account_id(),
+                            weight: 1,
+                        }),
+                        proofs: Some(vec![ura_update_proof]),
+                    },
                 },
             }
             .into(),
@@ -436,16 +442,17 @@ fn update_urauth_doc_works() {
         // Since threhold is 2, URAUTH Document has not been updated.
         // Bob should sign for update.
         let mut urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
-        println!("Document => {:?}", urauth_doc); 
+        println!("Document => {:?}", urauth_doc);
         let update_doc_field = UpdateDocField::MultiDID(WeightedDID {
             did: Charlie.to_account_id(),
             weight: 1,
         });
-        urauth_doc
-            .update_doc(update_doc_field.clone(), 4)
-            .unwrap();
+        urauth_doc.update_doc(update_doc_field.clone(), 4).unwrap();
         let bob_did = urauth_helper.generate_did(BOB_SS58);
-        let update_signature = urauth_helper.create_sr25519_signature(Bob, ProofType::Update(urauth_doc.clone(), bob_did.as_bytes().to_vec()));
+        let update_signature = urauth_helper.create_sr25519_signature(
+            Bob,
+            ProofType::Update(urauth_doc.clone(), bob_did.as_bytes().to_vec()),
+        );
         assert_ok!(URAuth::update_urauth_doc(
             RuntimeOrigin::signed(Bob.to_account_id()),
             uri.clone(),
@@ -477,63 +484,78 @@ fn update_urauth_doc_works() {
 
 #[test]
 fn verify_challenge_with_multiple_oracle_members() {
-
     let mut urauth_helper = MockURAuthHelper::<MockAccountId>::default(None, None, None, None);
     let (uri, owner_did, challenge_value, timestamp) = urauth_helper.deconstruct_urauth_doc();
-    let request_sig = urauth_helper.create_signature(
-        Alice, 
-        ProofType::Request(uri.clone(), owner_did.clone())
-    );
+    let request_sig =
+        urauth_helper.create_signature(Alice, ProofType::Request(uri.clone(), owner_did.clone()));
     let challenge_sig = urauth_helper.create_sr25519_signature(
-        Alice, 
-        ProofType::Challenge(uri.clone(), owner_did.clone(), challenge_value.clone(), timestamp.clone())
+        Alice,
+        ProofType::Challenge(
+            uri.clone(),
+            owner_did.clone(),
+            challenge_value.clone(),
+            timestamp.clone(),
+        ),
     );
-    let challenge_value = urauth_helper.generate_json("Sr25519Signature2020".into(), hex::encode(challenge_sig));
+    let challenge_value =
+        urauth_helper.generate_json("Sr25519Signature2020".into(), hex::encode(challenge_sig));
 
     new_test_ext().execute_with(|| {
-        assert_ok!(
-            URAuth::add_oracle_member(RuntimeOrigin::root(), Alice.to_account_id())
-        );
-        assert_ok!(
-            URAuth::add_oracle_member(RuntimeOrigin::root(), Bob.to_account_id())
-        );
-        assert_ok!(
-            URAuth::add_oracle_member(RuntimeOrigin::root(), Charlie.to_account_id())
-        );
+        assert_ok!(URAuth::add_oracle_member(
+            RuntimeOrigin::root(),
+            Alice.to_account_id()
+        ));
+        assert_ok!(URAuth::add_oracle_member(
+            RuntimeOrigin::root(),
+            Bob.to_account_id()
+        ));
+        assert_ok!(URAuth::add_oracle_member(
+            RuntimeOrigin::root(),
+            Charlie.to_account_id()
+        ));
         assert!(OracleMembers::<Test>::get().len() == 3);
 
-        assert_ok!(
-            URAuth::urauth_request_register_domain_owner(
-                RuntimeOrigin::signed(Alice.to_account_id()), 
-                uri.clone(), 
-                owner_did.clone(), 
-                Some(urauth_helper.challenge_value()), 
-                MultiSigner::Sr25519(Alice.public()), 
-                request_sig
-            )
-        );
+        assert_ok!(URAuth::urauth_request_register_domain_owner(
+            RuntimeOrigin::signed(Alice.to_account_id()),
+            uri.clone(),
+            owner_did.clone(),
+            Some(urauth_helper.challenge_value()),
+            MultiSigner::Sr25519(Alice.public()),
+            request_sig
+        ));
 
-        assert_ok!(
-            URAuth::verify_challenge(
-                RuntimeOrigin::signed(Alice.to_account_id()), 
-                challenge_value.clone()
-            )
-        );
+        assert_ok!(URAuth::verify_challenge(
+            RuntimeOrigin::signed(Alice.to_account_id()),
+            challenge_value.clone()
+        ));
 
-        System::assert_has_event(URAuthEvent::VerificationInfo { uri: uri.clone(), progress_status: VerificationSubmissionResult::InProgress }.into());
+        System::assert_has_event(
+            URAuthEvent::VerificationInfo {
+                uri: uri.clone(),
+                progress_status: VerificationSubmissionResult::InProgress,
+            }
+            .into(),
+        );
 
         assert_noop!(
-            URAuth::verify_challenge(RuntimeOrigin::signed(Dave.to_account_id()), challenge_value.clone()),
+            URAuth::verify_challenge(
+                RuntimeOrigin::signed(Dave.to_account_id()),
+                challenge_value.clone()
+            ),
             Error::<Test>::NotOracleMember
         );
 
-        assert_ok!(
-            URAuth::verify_challenge(
-                RuntimeOrigin::signed(Bob.to_account_id()), 
-                challenge_value
-            )
-        );
+        assert_ok!(URAuth::verify_challenge(
+            RuntimeOrigin::signed(Bob.to_account_id()),
+            challenge_value
+        ));
 
-        System::assert_has_event(URAuthEvent::VerificationInfo { uri: uri.clone(), progress_status: VerificationSubmissionResult::Complete }.into());
+        System::assert_has_event(
+            URAuthEvent::VerificationInfo {
+                uri: uri.clone(),
+                progress_status: VerificationSubmissionResult::Complete,
+            }
+            .into(),
+        );
     })
 }

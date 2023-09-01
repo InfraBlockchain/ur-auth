@@ -1,8 +1,7 @@
-
 pub use crate::{self as pallet_urauth, *};
 use frame_support::{parameter_types, traits::Everything};
 use frame_system::EnsureRoot;
-use sp_core::{H256, sr25519::Signature};
+use sp_core::{sr25519::Signature, H256};
 use sp_runtime::{
     testing::Header,
     traits::{BlakeTwo256, IdentityLookup},
@@ -101,22 +100,22 @@ pub struct MockURAuthHelper<Account> {
 
 impl<Account: Encode> MockURAuthHelper<Account> {
     pub fn default(
-        uri: Option<String>, 
-        account_id: Option<String>, 
-        timestamp: Option<String>, 
+        uri: Option<String>,
+        account_id: Option<String>,
+        timestamp: Option<String>,
         challenge_value: Option<String>,
     ) -> Self {
         let account_id = account_id.map_or(String::from(ALICE_SS58), |id| id);
         Self {
             mock_doc_manager: MockURAuthDocManager::new(
-                uri.map_or(String::from("www.website1.com"), |uri| uri), 
+                uri.map_or(String::from("www.website1.com"), |uri| uri),
                 format!("{}{}", "did:infra:ua:", account_id),
-                challenge_value.map_or(String::from("E40Bzg8kAvOIjswwxc29WaQCHuOKwoZC"), |cv| cv), 
-                timestamp.map_or(String::from("2023-07-28T10:17:21Z"), |t| t), 
-                None, 
-                None
+                challenge_value.map_or(String::from("E40Bzg8kAvOIjswwxc29WaQCHuOKwoZC"), |cv| cv),
+                timestamp.map_or(String::from("2023-07-28T10:17:21Z"), |t| t),
+                None,
+                None,
             ),
-            mock_prover: MockProver(Default::default())
+            mock_prover: MockProver(Default::default()),
         }
     }
 
@@ -128,11 +127,20 @@ impl<Account: Encode> MockURAuthHelper<Account> {
         self.mock_prover.raw_payload(proof_type)
     }
 
-    pub fn create_sr25519_signature(&mut self, signer: sp_keyring::AccountKeyring, proof_type: ProofType<Account>) -> Signature {
-        self.mock_prover.create_sr25519_signature(signer, proof_type)
+    pub fn create_sr25519_signature(
+        &mut self,
+        signer: sp_keyring::AccountKeyring,
+        proof_type: ProofType<Account>,
+    ) -> Signature {
+        self.mock_prover
+            .create_sr25519_signature(signer, proof_type)
     }
 
-    pub fn create_signature(&mut self, signer: sp_keyring::AccountKeyring, proof_type: ProofType<Account>) -> MultiSignature {
+    pub fn create_signature(
+        &mut self,
+        signer: sp_keyring::AccountKeyring,
+        proof_type: ProofType<Account>,
+    ) -> MultiSignature {
         self.mock_prover.create_signature(signer, proof_type)
     }
 
@@ -146,10 +154,12 @@ impl<Account: Encode> MockURAuthHelper<Account> {
 
     pub fn raw_owner_did(&self) -> Vec<u8> {
         self.mock_doc_manager.owner_did.as_bytes().to_vec()
-    } 
+    }
 
     pub fn challenge_value(&self) -> Randomness {
-        self.mock_doc_manager.challenge_value.as_bytes().to_vec()[..].try_into().unwrap()
+        self.mock_doc_manager.challenge_value.as_bytes().to_vec()[..]
+            .try_into()
+            .unwrap()
     }
 
     pub fn generate_did(&self, account_id: &str) -> String {
@@ -157,7 +167,10 @@ impl<Account: Encode> MockURAuthHelper<Account> {
     }
 
     pub fn generate_json(&mut self, proof_type: String, proof: String) -> Vec<u8> {
-        self.mock_doc_manager.generate_json(proof_type, proof).as_bytes().to_vec()
+        self.mock_doc_manager
+            .generate_json(proof_type, proof)
+            .as_bytes()
+            .to_vec()
     }
 }
 
@@ -165,21 +178,18 @@ impl<Account: Encode> MockURAuthHelper<Account> {
 pub enum ProofType<Account: Encode> {
     Request(URI, OwnerDID),
     Challenge(URI, OwnerDID, Vec<u8>, Vec<u8>),
-    Update(URAuthDoc<Account>, Vec<u8>)
+    Update(URAuthDoc<Account>, Vec<u8>),
 }
 
 pub struct MockProver<Account>(PhantomData<Account>);
 
 impl<Account: Encode> MockProver<Account> {
-
     fn raw_payload(&mut self, proof_type: ProofType<Account>) -> Vec<u8> {
         let raw = match proof_type {
-            ProofType::Request(uri, owner_did) => {
-                (uri, owner_did).encode()
-            },
-            ProofType::Challenge(uri, owner_did, challenge, timestamp) => {    
+            ProofType::Request(uri, owner_did) => (uri, owner_did).encode(),
+            ProofType::Challenge(uri, owner_did, challenge, timestamp) => {
                 (uri, owner_did, challenge, timestamp).encode()
-            },
+            }
             ProofType::Update(urauth_doc, owner_did) => {
                 let URAuthDoc {
                     id,
@@ -217,12 +227,20 @@ impl<Account: Encode> MockProver<Account> {
         }
     }
 
-    fn create_sr25519_signature(&mut self, signer: sp_keyring::AccountKeyring, proof_type: ProofType<Account>) -> Signature {
+    fn create_sr25519_signature(
+        &mut self,
+        signer: sp_keyring::AccountKeyring,
+        proof_type: ProofType<Account>,
+    ) -> Signature {
         let raw_payload = self.raw_payload(proof_type);
         signer.sign(&raw_payload)
     }
 
-    fn create_signature(&mut self, signer: sp_keyring::AccountKeyring, proof_type: ProofType<Account>) -> MultiSignature {
+    fn create_signature(
+        &mut self,
+        signer: sp_keyring::AccountKeyring,
+        proof_type: ProofType<Account>,
+    ) -> MultiSignature {
         let raw_payload = self.raw_payload(proof_type);
         let sig = signer.sign(&raw_payload);
         sig.into()
@@ -239,15 +257,21 @@ pub struct MockURAuthDocManager {
 }
 
 impl MockURAuthDocManager {
-
-    pub fn new(uri: String, owner_did: String, challenge_value: String, timestamp: String, proof_type: Option<String>, proof: Option<String>) -> Self {
+    pub fn new(
+        uri: String,
+        owner_did: String,
+        challenge_value: String,
+        timestamp: String,
+        proof_type: Option<String>,
+        proof: Option<String>,
+    ) -> Self {
         Self {
             uri,
             owner_did,
             challenge_value,
             timestamp,
             proof_type,
-            proof
+            proof,
         }
     }
 
@@ -257,7 +281,12 @@ impl MockURAuthDocManager {
 
     fn deconstruct(&self) -> (URI, Vec<u8>, Vec<u8>, Vec<u8>) {
         let uri = self.to_uri();
-        (uri, self.owner_did.as_bytes().to_vec(), self.challenge_value.as_bytes().to_vec(), self.timestamp.as_bytes().to_vec())
+        (
+            uri,
+            self.owner_did.as_bytes().to_vec(),
+            self.challenge_value.as_bytes().to_vec(),
+            self.timestamp.as_bytes().to_vec(),
+        )
     }
 
     fn challenge_value(&mut self, proof_type: String, proof: String) {
@@ -268,55 +297,61 @@ impl MockURAuthDocManager {
     fn generate_json(&mut self, proof_type: String, proof: String) -> String {
         use lite_json::Serialize;
         self.challenge_value(proof_type, proof);
-    
+
         let mut object_elements = vec![];
-    
+
         let object_key = "domain".chars().collect();
         object_elements.push((
             object_key,
             lite_json::JsonValue::String(self.uri.chars().collect()),
         ));
-    
+
         let object_key = "adminDID".chars().collect();
         object_elements.push((
             object_key,
             lite_json::JsonValue::String(self.owner_did.chars().collect()),
         ));
-    
+
         let object_key = "challenge".chars().collect();
         object_elements.push((
             object_key,
             lite_json::JsonValue::String(self.challenge_value.chars().collect()),
         ));
-    
+
         let object_key = "timestamp".chars().collect();
         object_elements.push((
             object_key,
             lite_json::JsonValue::String(self.timestamp.chars().collect()),
         ));
-    
+
         let mut proof_object = vec![];
         let object_key = "type".chars().collect();
         proof_object.push((
             object_key,
-            lite_json::JsonValue::String(self.proof_type.as_ref().expect("NO PROOF TYPE").chars().collect()),
+            lite_json::JsonValue::String(
+                self.proof_type
+                    .as_ref()
+                    .expect("NO PROOF TYPE")
+                    .chars()
+                    .collect(),
+            ),
         ));
-    
+
         let object_key = "proofValue".chars().collect();
         proof_object.push((
             object_key,
             lite_json::JsonValue::String(self.proof.as_ref().expect("NO PROOF").chars().collect()),
         ));
-    
+
         let object_key = "proof".chars().collect();
         object_elements.push((object_key, lite_json::JsonValue::Object(proof_object)));
-    
+
         let object_value = lite_json::JsonValue::Object(object_elements);
-    
+
         // Convert the object to a JSON string.
         let json = object_value.format(4);
         let json_output = std::str::from_utf8(&json).unwrap();
-    
+
         json_output.to_string()
     }
 }
@@ -336,5 +371,3 @@ impl ExtBuilder {
         ext.execute_with(test);
     }
 }
-
-
