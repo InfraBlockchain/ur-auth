@@ -458,6 +458,7 @@ fn update_urauth_doc_works() {
         ));
 
         let urauth_doc = URAuthTree::<Test>::get(&uri).unwrap();
+        println!("{:?}", urauth_doc);
         let proofs = urauth_doc.clone().proofs.unwrap();
         for proof in proofs {
             match proof {

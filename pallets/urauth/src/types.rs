@@ -491,10 +491,9 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         self.remaining_threshold = threshold;
     }
 
-    pub fn handle_available(&mut self, threshold: DIDWeight, update_doc_field: UpdateDocField<Account>, proof: Proof) {
-        let proofs: Option<Vec<Proof>> = Some(vec![proof]);
+    pub fn handle_available(&mut self, threshold: DIDWeight, update_doc_field: UpdateDocField<Account>) {
         self.set_remaining_threshold(threshold);
-        self.in_progress(update_doc_field, proofs);
+        self.in_progress(update_doc_field, None);
     }
 
     pub fn handle_in_progress(

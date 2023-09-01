@@ -473,11 +473,11 @@ impl<T: Config> Pallet<T> {
         updated_at: u128,
         maybe_proof: Option<Proof>
     ) -> Result<(URAuthDoc<T::AccountId>, UpdateDocStatus<T::AccountId>), DispatchError> {
-        let proof = maybe_proof.ok_or(Error::<T>::ProofMissing)?;
+        let _ = maybe_proof.ok_or(Error::<T>::ProofMissing)?;
         let mut urauth_doc =
             URAuthTree::<T>::get(uri).ok_or(Error::<T>::URAuthTreeNotRegistered)?;
         let mut update_doc_status = URAuthDocUpdateStatus::<T>::get(&urauth_doc.id);
-        Self::do_try_update_doc(&mut urauth_doc, &mut update_doc_status, update_doc_field, updated_at, proof)?;
+        Self::do_try_update_doc(&mut urauth_doc, &mut update_doc_status, update_doc_field, updated_at)?;
         
         Ok((urauth_doc, update_doc_status))
     }
@@ -496,6 +496,7 @@ impl<T: Config> Pallet<T> {
             .get_did_weight(&account_id)
             .ok_or(Error::<T>::AccountMissing)?;
         let remaining_threshold = update_doc_status.remaining_threshold;
+        update_doc_status.handle_in_progress(did_weight, update_doc_field.clone(), proof).map_err(|_| Error::<T>::ErrorOnUpdateDocStatus)?;
         if did_weight >= remaining_threshold {
             let new_proofs = update_doc_status.get_proofs();
             urauth_doc.handle_proofs(new_proofs);
@@ -506,7 +507,6 @@ impl<T: Config> Pallet<T> {
                 urauth_doc: urauth_doc.clone(),
             });
         } else {
-            update_doc_status.handle_in_progress(did_weight, update_doc_field, proof).map_err(|_| Error::<T>::ErrorOnUpdateDocStatus)?;
             URAuthDocUpdateStatus::<T>::insert(urauth_doc.id, update_doc_status.clone());
             Pallet::<T>::deposit_event(Event::<T>::UpdateInProgress {
                 urauth_doc: urauth_doc.clone(),
@@ -712,14 +712,12 @@ impl<T: Config> Pallet<T> {
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
         update_doc_field: &UpdateDocField<T::AccountId>,
         threshold: DIDWeight, 
-        proof: &Proof,
     ) -> Result<(), DispatchError>{
         match &update_doc_status.status {
             UpdateStatus::Available => {
                 update_doc_status.handle_available(
                     threshold, 
-                    update_doc_field.clone(),
-                    proof.clone()
+                    update_doc_field.clone()
                 );
             },
             UpdateStatus::InProgress{ field, .. } => {
@@ -736,8 +734,7 @@ impl<T: Config> Pallet<T> {
         urauth_doc: &mut URAuthDoc<T::AccountId>,
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
         update_doc_field: &UpdateDocField<T::AccountId>,
-        updated_at: u128,
-        proof: Proof
+        updated_at: u128
     ) -> Result<(), DispatchError> {
 
         let prev_updated_at = urauth_doc.updated_at;
@@ -747,8 +744,7 @@ impl<T: Config> Pallet<T> {
         Self::handle_update_doc_status(
             update_doc_status, 
             update_doc_field, 
-            urauth_doc.get_threshold(), 
-            &proof
+            urauth_doc.get_threshold()
         )?;
 
         urauth_doc
