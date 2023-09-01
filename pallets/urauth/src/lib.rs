@@ -119,9 +119,9 @@ pub mod pallet {
     #[pallet::unbounded]
     /// **Description:**
     ///
-    /// A random Challenge value is stored for the requested URI.
-    /// The Randomness consists of a random value of 32 bytes.
-    ///
+    /// The status of the URAuthDoc that has been requested for update on a specific field is stored in the form of UpdateDocStatus.
+    /// URAuthDoc updates are only possible when the UpdateStatus is set to `Available`.
+    /// 
     /// **Key:**
     ///
     /// DocId
@@ -134,13 +134,34 @@ pub mod pallet {
 
     #[pallet::storage]
     #[pallet::getter(fn oracle_members)]
+    /// **Description:**
+    ///
+    /// Contains the AccountId information of the Oracle node.
+    /// 
+    /// **Value:**
+    ///
+    /// BoundedVec<T::AccoutnId, T::MaxOracleMembers>
     pub type OracleMembers<T: Config> =
         StorageValue<_, BoundedVec<T::AccountId, T::MaxOracleMembers>, ValueQuery>;
 
     #[pallet::storage]
     #[pallet::unbounded]
+    /// **Description:**
+    ///
+    /// Contains various _config_ information for the URAuth pallet.
+    /// 
+    /// **Value:**
+    ///
+    /// ChallengeValueConfig
     pub type URAuthConfig<T: Config> = StorageValue<_, ChallengeValueConfig, ValueQuery>;
 
+    /// **Description:**
+    ///
+    /// A counter used for generating the document id of the URAuthDoc.
+    /// 
+    /// **Value:**
+    ///
+    /// URAuthDocCount
     #[pallet::storage]
     pub type Counter<T: Config> = StorageValue<_, URAuthDocCount, ValueQuery>;
 
@@ -176,30 +197,37 @@ pub mod pallet {
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
+        /// URI is requested for its ownership.
         URAuthRegisterRequested {
             uri: URI,
         },
+        /// `URAuthDoc` is registered on `URAuthTree`.
         URAuthTreeRegistered {
             count: URAuthDocCount,
             uri: URI,
             urauth_doc: URAuthDoc<T::AccountId>,
         },
+        /// Oracle member has submitted its verification of challenge value.
         VerificationSubmitted {
             member: T::AccountId,
             digest: H256,
         },
+        /// Result of `VerificationSubmission`.
         VerificationInfo {
             uri: URI,
             progress_status: VerificationSubmissionResult,
         },
+        /// `URAuthDoc` has been updated for specific fiend.
         URAuthDocUpdated {
             update_doc_field: UpdateDocField<T::AccountId>,
             urauth_doc: URAuthDoc<T::AccountId>,
         },
+        /// Update of `URAuthDoc` is in progress.
         UpdateInProgress {
             urauth_doc: URAuthDoc<T::AccountId>,
             update_doc_status: UpdateDocStatus<T::AccountId>,
         },
+        /// Request of registering URI has been removed.
         Removed {
             uri: URI,
         },
@@ -207,35 +235,72 @@ pub mod pallet {
 
     #[pallet::error]
     pub enum Error<T> {
+        /// May have overflowed its type(e.g Counter)
         Overflow,
+        /// General error to do with the owner's proofs (e.g. signature).
         BadProof,
+        /// The sending address is disabled or known to be invalid.
         BadSigner,
+        /// General error on challenge value(e.g parsing json-string, different challenge value).
         BadChallengeValue,
+        /// Error on verifying challenge before requesting its ownership.
         BadRequest,
+        /// Error on converting raw-json to json-string.
         ErrorConvertToString,
-        ErrorConvertToAccountId,
+        /// Error on converting raw-signature to concrete type signature.
         ErrorConvertToSignature,
+        /// Error on decoding raw-did to bs58 encoding
         ErrorDecodeBs58,
+        /// Error on converting `AccountId32` to `T::AccountId`
         ErrorDecodeAccountId,
+        /// Error on decoding hex encoding string to actual string
         ErrorDecodeHex,
+        /// General error on updating `URAuthDoc`(e.g Invalid UpdatedAt, Different update field)
         ErrorOnUpdateDoc,
+        /// General error on updating `URAuthDocUpdateStatus`(e.g ProofMissing for updating `URAuthDoc`)
         ErrorOnUpdateDocStatus,
+        /// Error on some authorized calls which required origin as Oracle member
         NotOracleMember,
+        /// Error when signer of signature is not `URAuthDoc` owner.
         NotURAuthDocOwner,
-        URINotVerfied,
-        AccountMissing,
-        OwnerMissing,
+        /// General error on proof where it is required but it is not given.
         ProofMissing,
+        /// Error when challenge value is not stored for requested URI.
         ChallengeValueMissing,
+        /// Challenge value is not provided when `ChallengeValueConfig.randomness` is false.
         ChallengeValueNotProvided,
+        /// When try to update `URAuthDoc` which has not registered.
         URAuthTreeNotRegistered,
+        /// Oracle node has voted more than once
         AlreadySubmitted,
+        /// When trying to add oracle member more than `T::MaxOracleMembers`
         MaxOracleMembers,
+        /// When trying to update different field on `UpdateInProgress` field
         UpdateInProgress,
     }
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
+
+        // Description:
+		// This transaction is for a domain owner to request ownership registration in the URAuthTree. 
+        // It involves verifying the signature for the data owner's DID on the given URI and, 
+        // if valid, generating a Challenge Value and storing it in the Storage.
+		//
+		// Origin:
+		// ** Signed call **
+		//
+		// Params:
+		// - uri: URI to be claimed its ownership
+        // - owner_did: URI owner's DID
+        // - challenge_value: Challenge value for verification
+        // - signer: Entity who creates signature
+        // - proof: Proof of URI's ownership 
+		//
+		// Logic:
+		// 1. Creation of a message for signature verification: `payload = (uri, owner_did).encode()`
+        // 2. Signature verification
+        // 3. If the signature is valid, generate a metadata(owner_did, challenge_value)
         #[pallet::call_index(0)]
         #[pallet::weight(1_000)]
         pub fn urauth_request_register_domain_owner(
@@ -244,11 +309,11 @@ pub mod pallet {
             owner_did: OwnerDID,
             challenge_value: Option<Randomness>,
             signer: MultiSigner,
-            signature: MultiSignature,
+            proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
 
-            Self::verify_request_proof(&uri, &owner_did, &signature, signer)?;
+            Self::verify_request_proof(&uri, &owner_did, &proof, signer)?;
 
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
@@ -264,9 +329,25 @@ pub mod pallet {
             Ok(())
         }
 
-        #[pallet::call_index(2)]
+        // Description:
+		// Oracle node will download `challenge-value.json` and call this transaction
+        // , which is responsible for validating the challenge
+        // To successfully register the `URAuthDoc` in the `URAuthTree`, 
+        // it's necessary that over 60% of the members in OracleMembers::<T> submit their validations. 
+        // Additionally, the approvals must meet this threshold to be considered valid for the registration of the URAuthDoc in the URAuthTree.
+		//
+		// Origin:
+		// ** Signed call **
+		//
+		// Params:
+		// - challenge_value: Raw of challenge-value-json-string.
+        // 
+		// Logic:
+		// 1. Creation of a message for signature verification: `payload = (uri, owner_did).encode()`
+        // 2. Signature verification
+        // 3. If the signature is valid, generate a metadata(owner_did, challenge_value)
+        #[pallet::call_index(1)]
         #[pallet::weight(1_000)]
-        /// ToDo: URI Verification Period
         pub fn verify_challenge(origin: OriginFor<T>, challenge_value: Vec<u8>) -> DispatchResult {
             let who = ensure_signed(origin)?;
             ensure!(
@@ -304,7 +385,27 @@ pub mod pallet {
             Ok(())
         }
 
-        #[pallet::call_index(3)]
+        // Description:
+		// After the registration in the URAuthTree is completed, 
+        // this transaction allows the owner to update the URAuthDoc. 
+        // Upon verifying the proof and if it's valid, 
+        // the transaction compares the weight values of owner DIDs and the threshold. 
+        // Finally, the updated URAuthDoc is stored in the URAuthTree.
+		//
+		// Origin:
+		// ** Signed call **
+		//
+		// Params:
+		// - uri: Key of `URAuthTree`
+        // - update_doc_field: Which field of `URAuthDoc` to update
+        // - updated_at: Timeframe of updating `URAuthDoc`
+        // - proof: Proof of updating `URAuthDoc`
+        // 
+		// Logic:
+		// 1. Update the doc based on `UpdateDocStatus` & `UpdateDocField`
+        // 2. Verify its given proof
+        // 3. If valid, store on `URAuthTree` based on Multi DIDs weight and threshold
+        #[pallet::call_index(2)]
         #[pallet::weight(1_000)]
         pub fn update_urauth_doc(
             origin: OriginFor<T>,
@@ -328,7 +429,15 @@ pub mod pallet {
             Ok(())
         }
 
-        #[pallet::call_index(4)]
+        // Description:
+        // This transaction involves adding members of the Oracle node to the verification request after downloading the Challenge Value.
+		//
+		// Origin:
+		// ** Root(Authorized) privileged call **
+		//
+		// Params:
+		// - who: Whom to be included as Oracle member
+        #[pallet::call_index(3)]
         #[pallet::weight(1_000)]
         pub fn add_oracle_member(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
             T::AuthorizedOrigin::ensure_origin(origin)?;
@@ -340,7 +449,15 @@ pub mod pallet {
             Ok(())
         }
 
-        #[pallet::call_index(5)]
+        // Description:
+        // This transaction allows for the update of various configurations within the URAuth pallet.
+		//
+		// Origin:
+		// ** Root(Authorized) privileged call **
+		//
+		// Params:
+		// - randomness_enabled: Flag whether to create its randomness on-chain
+        #[pallet::call_index(4)]
         #[pallet::weight(1_000)]
         pub fn update_urauth_config(
             origin: OriginFor<T>,
@@ -349,7 +466,7 @@ pub mod pallet {
             T::AuthorizedOrigin::ensure_origin(origin)?;
 
             URAuthConfig::<T>::mutate(|challenge_value_config| {
-                challenge_value_config.set_randomness_enabled(randomness_enabled);
+                challenge_value_config.randomness_enabled = randomness_enabled;
             });
 
             Ok(())
@@ -358,6 +475,7 @@ pub mod pallet {
 }
 
 impl<T: Config> Pallet<T> {
+    /// 16 bytes uuid based on `URAuthDocCount`
     fn doc_id(index: u128) -> [u8; 16] {
         let b = index.to_le_bytes();
         nuuid::Uuid::from_bytes(b).to_bytes()
@@ -367,11 +485,14 @@ impl<T: Config> Pallet<T> {
         T::UnixTime::now().as_millis()
     }
 
-    // ToDo
     fn challenge_value() -> Randomness {
         Default::default()
     }
 
+    /// Verify `request` signature
+    /// 
+    /// 1. Check whether owner and signer are same
+    /// 2. Check the signature 
     fn verify_request_proof(
         uri: &URI,
         owner_did: &OwnerDID,
@@ -400,6 +521,7 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
+    /// Handle the result of _challenge value_ verification based on `VerificationSubmissionResult`
     fn handle_verification_submission_result(
         res: &VerificationSubmissionResult,
         verficiation_submission: VerificationSubmission<T>,
@@ -434,6 +556,11 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
+    /// Verify _challenge value_
+    /// 
+    /// 1. Check given signature 
+    /// 2. Check whether `signer` and `owner` are identical
+    /// 3. Check whether `given` challenge value is same with `onchain` challenge value
     fn try_verify_challenge_value(
         sig: Vec<u8>,
         proof_type: Vec<u8>,
@@ -454,7 +581,8 @@ impl<T: Config> Pallet<T> {
         Self::check_challenge_value(uri, challenge)?;
         Ok(signer)
     }
-
+    
+    /// Check whether `owner` and `signer` are identical
     fn check_is_valid_owner(
         raw_owner_did: &Vec<u8>,
         signer: &T::AccountId,
@@ -465,12 +593,30 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
+    /// Check whether `given` challenge value is same with `onchain` challenge value
+    /// 
+    /// ## Errors
+    /// 
+    /// `ChallengeValueMissing`
+    /// 
+    /// Challenge value for given _uri_ is not stored
+    /// 
+    /// - `BadChallengeValue`
+    /// 
+    /// Given challenge value and onchain challenge value are not identical
     fn check_challenge_value(uri: &URI, challenge: Vec<u8>) -> Result<(), DispatchError> {
         let cv = ChallengeValue::<T>::get(&uri).ok_or(Error::<T>::ChallengeValueMissing)?;
         ensure!(challenge == cv.to_vec(), Error::<T>::BadChallengeValue);
         Ok(())
     }
 
+    /// Update the `URAuthDoc` based on `UpdateDocField`. 
+    /// If it is first time requestsed, `UpdateStatus` would be `Available`.
+    /// Otherwise, `InProgress { .. }`. 
+    /// 
+    /// ## Errors
+    /// `ProofMissing`
+    /// `URAuthTreeNotRegistered`
     fn try_update_urauth_doc(
         uri: &URI,
         update_doc_field: &UpdateDocField<T::AccountId>,
@@ -491,6 +637,11 @@ impl<T: Config> Pallet<T> {
         Ok((urauth_doc, update_doc_status))
     }
 
+    /// Try to store _updated_ `URAuthDoc` on `URAuthTree::<T>`.
+    /// 
+    /// Check whether _did_weight_ is greater of equal to _remaining_threshold_.
+    /// If it is bigger, _1. remove all previous proofs 2. and store on `URAuthTree::<T>`._
+    /// Otherwise, update `URAuthDocUpdateStatus`.
     fn handle_updated_urauth_doc(
         signer: AccountId32,
         proof: Proof,
@@ -503,7 +654,7 @@ impl<T: Config> Pallet<T> {
         let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
         let did_weight = multi_did
             .get_did_weight(&account_id)
-            .ok_or(Error::<T>::AccountMissing)?;
+            .ok_or(Error::<T>::NotURAuthDocOwner)?;
         let remaining_threshold = update_doc_status.remaining_threshold;
         update_doc_status
             .handle_in_progress(did_weight, update_doc_field.clone(), proof)
@@ -527,6 +678,14 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
+    /// Try verify proof of _updated_ `URAuthDoc`.
+    /// 
+    /// ## Errors
+    /// `ProofMissing` : Proof is not provided
+    /// 
+    /// `NotURAuthDocOwner` : If signer is not owner of `URAuthDoc`
+    /// 
+    /// `BadProof` : Signature is not valid
     fn try_verify_urauth_doc_proof(
         urauth_doc: &URAuthDoc<T::AccountId>,
         proof: Option<Proof>,
@@ -550,6 +709,7 @@ impl<T: Config> Pallet<T> {
         Ok((signer, proof.expect("Already checked!")))
     }
 
+    /// Try to store _updated_urauth_doc_ on `URAuthTree::<T>` based on `URAuthDocStatus`
     fn try_store_updated_urauth_doc(
         signer: AccountId32,
         proof: Proof,
@@ -568,6 +728,10 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
+    /// Convert raw signature type to _concrete(`MultiSignature`)_ signature type
+    /// 
+    /// ## Error
+    /// `ErrorConvertToSignature`
     fn raw_signature_to_multi_sig(
         proof_type: &Vec<u8>,
         sig: &Vec<u8>,
@@ -589,6 +753,10 @@ impl<T: Config> Pallet<T> {
         }
     }
 
+    /// Remove all `URI` related data when `VerificationSubmissionResult::Complete` or `VerificationSubmissionResult::Tie`
+    /// 
+    /// ## Changes
+    /// `URIMetadata`, `URIVerificationInfo`, `ChallengeValue`
     fn remove_all_uri_related(uri: URI) {
         URIMetadata::<T>::remove(&uri);
         URIVerificationInfo::<T>::remove(&uri);
@@ -597,9 +765,16 @@ impl<T: Config> Pallet<T> {
         Self::deposit_event(Event::<T>::Removed { uri })
     }
 
-    /// Return
-    ///
-    /// (Signature, RuntimeGereratedProof, AccountId)
+    /// Try prase the raw-json and return opaque type of 
+    /// (`Signature`, `proof type`, `payload`, `uri`, `owner_did`, `challenge`)
+    /// 
+    /// ## Errors
+    /// `ErrorConvertToString`
+    /// - Error on converting raw-json to string-json
+    /// 
+    /// `BadChallengeValue`
+    /// - When input is not type of `lite_json::Object` 
+    /// - Fail on parsing some fields
     fn try_handle_challenge_value(
         challenge_value: &Vec<u8>,
     ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, URI, Vec<u8>, Vec<u8>), DispatchError> {
@@ -650,6 +825,10 @@ impl<T: Config> Pallet<T> {
         }
     }
 
+    /// Method for finding _json_value_ based on `field_name` and `sub_field`
+    /// 
+    /// ## Error
+    /// `BadChallengeValue`
     fn find_json_value(
         json_object: &lite_json::JsonObject,
         field_name: &str,
@@ -669,6 +848,12 @@ impl<T: Config> Pallet<T> {
         }
     }
 
+    /// Try to convert some id sources to `T::AccountId` based on `AccountIdSource::DID` or `AccountIdSource::AccountId32`
+    /// 
+    /// ## Error
+    /// `BadChallengeValue`: Since AccountId is length of _48_. If is shorter than 48, we assume it is invalid.
+    /// 
+    /// `ErrorDecodeAccountId` : Fail on convert from `AccountId32` to `T::AccountId`
     fn account_id_from_source(source: AccountIdSource) -> Result<T::AccountId, DispatchError> {
         let account_id32 = match source {
             AccountIdSource::DID(mut raw_owner_did) => {
@@ -677,7 +862,7 @@ impl<T: Config> Pallet<T> {
                     return Err(Error::<T>::BadChallengeValue.into());
                 }
                 let actual_owner_did: Vec<u8> =
-                    raw_owner_did.drain(byte_len - 48..byte_len).collect();
+                    raw_owner_did.drain(byte_len-48..byte_len).collect();
                 let mut output = bs58::decode(actual_owner_did)
                     .into_vec()
                     .map_err(|_| Error::<T>::ErrorDecodeBs58)?;
@@ -695,6 +880,10 @@ impl<T: Config> Pallet<T> {
         Ok(account_id)
     }
 
+    /// Try to convert from `raw_owner_did` to `AccountId32`
+    /// 
+    /// ## Error
+    /// `BadChallengeValue`, `ErrorDecodeBs58`
     fn account_id32_from_raw_did(mut raw_owner_did: Vec<u8>) -> Result<AccountId32, DispatchError> {
         let byte_len = raw_owner_did.len();
         if byte_len < 48 {
@@ -714,10 +903,21 @@ impl<T: Config> Pallet<T> {
 }
 
 impl<T: Config> Pallet<T> {
-    fn check_valid_updated_at(prev: u128, now: u128) -> bool {
-        prev <= now
+    /// Check whether `updated_at` is greater than `prev_updated_at`
+    /// 
+    /// ## Error
+    /// `ErrorOnUpdateDoc`
+    fn check_valid_updated_at(prev: u128, now: u128) -> Result<(), DispatchError> {
+        if !prev <= now {
+            return Err(Error::<T>::ErrorOnUpdateDoc.into());
+        }
+        Ok(())
     }
 
+    /// Try handle for updating `URAuthDocStatus`
+    /// 
+    /// ## Error
+    /// `ErrorOnUpdateDoc` : Try to update on different field 
     fn handle_update_doc_status(
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
         update_doc_field: &UpdateDocField<T::AccountId>,
@@ -737,6 +937,14 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
+    /// Try to update doc and return _Err_ if any.
+    /// 
+    /// ## Errors
+    /// 
+    /// `ErrorOnUpdateDoc`
+    /// - _updated_at_ is less than _pref_updated_at_
+    /// - Try to update on different field 
+    /// - Threshold is bigger than sum of _multi_dids'_ weight
     pub fn do_try_update_doc(
         urauth_doc: &mut URAuthDoc<T::AccountId>,
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
@@ -744,9 +952,7 @@ impl<T: Config> Pallet<T> {
         updated_at: u128,
     ) -> Result<(), DispatchError> {
         let prev_updated_at = urauth_doc.updated_at;
-        if !Self::check_valid_updated_at(prev_updated_at, updated_at) {
-            return Err(Error::<T>::ErrorOnUpdateDoc.into());
-        }
+        Self::check_valid_updated_at(prev_updated_at, updated_at)?;
         Self::handle_update_doc_status(
             update_doc_status,
             update_doc_field,
@@ -763,6 +969,11 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
+    /// ## **RUNTIME API METHOD**
+    /// 
+    /// Return _updated_ `Some(URAuthDoc)`. 
+    /// Return `None` if given `URI` is not registered on `URAuthTree` 
+    /// or `ErrorOnUpdateDoc`.
     pub fn get_updated_doc(
         uri: URI,
         update_doc_field: UpdateDocField<T::AccountId>,

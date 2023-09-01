@@ -16,13 +16,7 @@ pub type Threshold = u32;
 pub type URAuthDocCount = u128;
 pub type RemainingThreshold = u16;
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, Default, RuntimeDebug, MaxEncodedLen, TypeInfo)]
-pub enum Status {
-    #[default]
-    Requested,
-    Verfied,
-}
-
+/// Opaque bytes of uri
 #[derive(Encode, Decode, Clone, PartialEq, Eq, Default, RuntimeDebug, TypeInfo)]
 pub struct URI(pub Vec<u8>);
 
@@ -36,6 +30,7 @@ impl URI {
     }
 }
 
+/// Metadata for verifying challenge value 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct Metadata {
     pub owner_did: Vec<u8>,
@@ -51,58 +46,61 @@ impl Metadata {
     }
 }
 
+/// Submission detail for verifying challenge value
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 #[scale_info(skip_type_params(T))]
 pub struct VerificationSubmission<T: Config> {
-    pub submission: Vec<(T::AccountId, H256)>,
+    pub voters: Vec<T::AccountId>,
+    pub status: BTreeMap<H256, ApprovalCount>,
     pub threshold: Threshold,
 }
 
 impl<T: Config> Default for VerificationSubmission<T> {
     fn default() -> Self {
         Self {
-            submission: Default::default(),
+            voters: Default::default(),
+            status: BTreeMap::new(),
             threshold: 1,
         }
     }
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub enum VerificationSubmissionResult {
-    InProgress,
-    Complete,
-    Tie,
-}
-
 impl<T: Config> VerificationSubmission<T> {
+    /// Submit its verfication info. Threshold will be changed based on _oracle members_.
+    /// 
+    /// ## Logistics
+    /// 1. Update the threshold based on number of _oracle member_.
+    /// 2. Check whether given `T::AccountId` has already submitted.
+    /// 3. Check whether to end its verification. `self.check_is_end`
+    /// 
+    /// ## Errors
+    /// `AlreadySubmitted`
     pub fn submit(
         &mut self,
         member_count: usize,
         submission: (T::AccountId, H256),
     ) -> Result<VerificationSubmissionResult, DispatchError> {
         self.update_threshold(member_count);
-        for (acc, _) in self.submission.iter() {
+        for acc in self.voters.iter() {
             if &submission.0 == acc {
                 return Err(Error::<T>::AlreadySubmitted.into());
             }
         }
-        self.submission.push(submission);
-        Ok(self.check_is_end(member_count))
+        self.voters.push(submission.0);
+        Ok(self.check_is_end(member_count, submission.1))
     }
 
-    fn check_is_end(&self, member_count: usize) -> VerificationSubmissionResult {
-        let mut map: BTreeMap<H256, ApprovalCount> = BTreeMap::new();
+    /// Check whether to finish its verification and return `VerificationSubmissionResult`. 
+    fn check_is_end(&mut self, member_count: usize, digest: H256) -> VerificationSubmissionResult {
         let mut is_end = false;
-        for (_, c) in self.submission.iter() {
-            map.entry(*c)
-                .and_modify(|v| {
-                    *v = v.saturating_add(1);
+        self.status.entry(digest)
+            .and_modify(|v| {
+                *v = v.saturating_add(1);
                     if *v >= self.threshold {
                         is_end = true;
                     }
-                })
-                .or_insert(1);
-        }
+            })
+            .or_insert(1);
 
         if is_end {
             return VerificationSubmissionResult::Complete;
@@ -110,13 +108,15 @@ impl<T: Config> VerificationSubmission<T> {
 
         if self.threshold == 1 {
             VerificationSubmissionResult::Complete
-        } else if self.submission.len() == member_count {
+        } else if self.voters.len() == member_count {
             VerificationSubmissionResult::Tie
         } else {
             VerificationSubmissionResult::InProgress
         }
     }
 
+    /// Update the treshold of `VerificationSubmission` based on member count. 
+    /// `Threshold = (membmer_count * 3 / 5) + remainder`
     pub fn update_threshold(&mut self, member_count: usize) {
         let threshold = (member_count * 3 / 5) as Threshold;
         let check_sum: Threshold = if (member_count * 3) % 5 == 0 { 0 } else { 1 };
@@ -124,6 +124,18 @@ impl<T: Config> VerificationSubmission<T> {
     }
 }
 
+/// Result state of verifying challenge value
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub enum VerificationSubmissionResult {
+    /// Threshold has not yet reached.
+    InProgress,
+    /// Number of approval of a challenge value has reached to threshold.
+    Complete,
+    /// Number of voters and oracle member are same.
+    Tie,
+}
+
+/// Configuration of challenge value.
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct ChallengeValueConfig {
@@ -142,12 +154,9 @@ impl ChallengeValueConfig {
     pub fn randomness_enabled(&self) -> bool {
         self.randomness_enabled
     }
-
-    pub fn set_randomness_enabled(&mut self, enabled: bool) {
-        self.randomness_enabled = enabled;
-    }
 }
 
+/// A payload factory for creating message for verifying its signature.
 #[derive(Decode, Clone, PartialEq, Eq)]
 pub enum URAuthSignedPayload<Account> {
     Request {
@@ -222,6 +231,7 @@ pub enum AccountIdSource {
     AccountId32(AccountId32),
 }
 
+/// DID with its weight
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
 pub struct WeightedDID<Account> {
     pub did: Account,
@@ -233,7 +243,8 @@ impl<Account> WeightedDID<Account> {
         Self { did: acc, weight }
     }
 }
-// Multisig-enabled DID
+
+/// Owners of `URAuthDoc`. Its entities can update the doc based on its weight and threshold.
 #[derive(Encode, Decode, Clone, PartialEq, Debug, Eq, TypeInfo)]
 pub struct MultiDID<Account> {
     pub dids: Vec<WeightedDID<Account>>,
@@ -249,6 +260,7 @@ impl<Account: PartialEq> MultiDID<Account> {
         }
     }
 
+    /// Check whether given account is owner of `URAuthDoc`
     pub fn is_owner(&self, who: &Account) -> bool {
         for weighted_did in self.dids.iter() {
             if &weighted_did.did == who {
@@ -260,10 +272,6 @@ impl<Account: PartialEq> MultiDID<Account> {
 
     pub fn get_threshold(&self) -> DIDWeight {
         self.threshold
-    }
-
-    pub fn set_threshold(&mut self, new: DIDWeight) {
-        self.threshold = new;
     }
 
     pub fn add_owner(&mut self, weighted_did: WeightedDID<Account>) {
@@ -281,6 +289,7 @@ impl<Account: PartialEq> MultiDID<Account> {
         None
     }
 
+    /// Get sum of owners' weight
     pub fn total_weight(&self) -> DIDWeight {
         let mut total = 0;
         for did in self.dids.iter() {
@@ -427,7 +436,7 @@ where
                 if total_weight < new {
                     return Err(URAuthDocUpdateError::ThreholdError);
                 }
-                self.multi_owner_did.set_threshold(new);
+                self.multi_owner_did.threshold = new;
             }
             UpdateDocField::IdentityInfo(identity_info) => {
                 self.identity_info = identity_info;
@@ -463,6 +472,7 @@ pub enum UpdateDocField<Account> {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum UpdateStatus<Account> {
+    /// Hold updated field and its proofs. Proofs will be stored on `URAuthDoc`
     InProgress {
         field: UpdateDocField<Account>,
         proofs: Option<Vec<Proof>>,
@@ -470,8 +480,10 @@ pub enum UpdateStatus<Account> {
     Available,
 }
 
+/// Status for updating `URAuthDoc`
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub struct UpdateDocStatus<Account> {
+    /// Threshold for updating
     pub remaining_threshold: DIDWeight,
     pub status: UpdateStatus<Account>,
 }
@@ -490,19 +502,27 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         matches!(self.status, UpdateStatus::Available)
     }
 
-    pub fn set_remaining_threshold(&mut self, threshold: DIDWeight) {
-        self.remaining_threshold = threshold;
-    }
-
+    /// Handle on `UpdateStatus::Available`. 
+    /// 
+    /// 1. Set its _remaining_threshold_ to threshold of `URAuthDoc`
+    /// 2. Set its `UpdateStatus` to `UpdateStatus::InProgress`. 
+    /// Define its variant to `"to be updated"` field and _proofs_ to be `None`
     pub fn handle_available(
         &mut self,
         threshold: DIDWeight,
         update_doc_field: UpdateDocField<Account>,
     ) {
-        self.set_remaining_threshold(threshold);
-        self.in_progress(update_doc_field, None);
+        self.remaining_threshold = threshold;
+        self.status = UpdateStatus::InProgress { field: update_doc_field, proofs: None };
     }
 
+    /// Handle on `UpdateStatus::InProgress`
+    /// 
+    /// 1. Add proof 
+    /// 2. Decrease its threshold with amount of _did_weight_
+    /// 
+    /// ## Error
+    /// `ProofMissing`
     pub fn handle_in_progress(
         &mut self,
         did_weight: DIDWeight,
@@ -511,7 +531,7 @@ impl<Account: Clone> UpdateDocStatus<Account> {
     ) -> Result<(), UpdateDocStatusError> {
         if let Some(proofs) = self.add_proof(proof) {
             self.calc_remaining_threshold(did_weight);
-            self.in_progress(update_doc_field, Some(proofs));
+            self.status = UpdateStatus::InProgress { field: update_doc_field, proofs: Some(proofs) };
         } else {
             return Err(UpdateDocStatusError::ProofMissing.into());
         }
@@ -519,6 +539,7 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         Ok(())
     }
 
+    /// Get all proofs of `UpdateStatus::InProgress { proofs, ..}`. Otherwise, `None`
     pub fn get_proofs(&self) -> Option<Vec<Proof>> {
         match self.status.clone() {
             UpdateStatus::InProgress { proofs, .. } => proofs,
@@ -526,6 +547,7 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         }
     }
 
+    /// Add given proof on `UpdateStatus::InProgress { .. }`. Otherwise, `None`
     fn add_proof(&mut self, proof: Proof) -> Option<Vec<Proof>> {
         let maybe_proofs = match self.status.clone() {
             UpdateStatus::InProgress { proofs, .. } => {
@@ -542,39 +564,32 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         maybe_proofs
     }
 
+    /// Decrease threshold with amount to _did_weight. 
     fn calc_remaining_threshold(&mut self, did_weight: DIDWeight) {
         self.remaining_threshold = self.remaining_threshold.saturating_sub(did_weight);
     }
-
-    fn in_progress(&mut self, field: UpdateDocField<Account>, proofs: Option<Vec<Proof>>) {
-        self.status = UpdateStatus::InProgress { field, proofs }
-    }
 }
 
-/// Errors that may happen on offence reports.
+/// Errors that may happen on update `URAuthDoc`
 #[derive(PartialEq, sp_runtime::RuntimeDebug)]
 pub enum URAuthDocUpdateError {
-    UpdatedAtMissing,
+    /// Threshold should be less than total weight of owners
     ThreholdError,
-    InvalidUpdateAt,
-    UpdateInProgress,
 }
 
 impl sp_runtime::traits::Printable for URAuthDocUpdateError {
     fn print(&self) {
         "URAuthDocUpdateError".print();
         match self {
-            Self::UpdatedAtMissing => "UpdatedAtMissing".print(),
             Self::ThreholdError => "GreaterThanTotalWeight".print(),
-            Self::InvalidUpdateAt => "InvalidUpdatedAt".print(),
-            Self::UpdateInProgress => "UpdateInProgress".print(),
         }
     }
 }
 
-/// Errors that may happen on offence reports.
+/// Errors that may happen on `UpdateDocStatus`
 #[derive(PartialEq, sp_runtime::RuntimeDebug)]
 pub enum UpdateDocStatusError {
+    /// Proof should be existed on update`URAuthDoc`
     ProofMissing,
 }
 
@@ -585,9 +600,4 @@ impl sp_runtime::traits::Printable for UpdateDocStatusError {
             Self::ProofMissing => "PrrofMissingOnUpdate".print(),
         }
     }
-}
-
-pub trait RelayChainInterface<EpochIndex, Randomness> {
-    fn get_epoch_index() -> EpochIndex;
-    fn get_epoch_randomness() -> Randomness;
 }
