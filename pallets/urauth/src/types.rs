@@ -30,7 +30,7 @@ impl URI {
     }
 }
 
-/// Metadata for verifying challenge value 
+/// Metadata for verifying challenge value
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct Metadata {
     pub owner_did: Vec<u8>,
@@ -67,12 +67,12 @@ impl<T: Config> Default for VerificationSubmission<T> {
 
 impl<T: Config> VerificationSubmission<T> {
     /// Submit its verfication info. Threshold will be changed based on _oracle members_.
-    /// 
+    ///
     /// ## Logistics
     /// 1. Update the threshold based on number of _oracle member_.
     /// 2. Check whether given `T::AccountId` has already submitted.
     /// 3. Check whether to end its verification. `self.check_is_end`
-    /// 
+    ///
     /// ## Errors
     /// `AlreadySubmitted`
     pub fn submit(
@@ -90,15 +90,16 @@ impl<T: Config> VerificationSubmission<T> {
         Ok(self.check_is_end(member_count, submission.1))
     }
 
-    /// Check whether to finish its verification and return `VerificationSubmissionResult`. 
+    /// Check whether to finish its verification and return `VerificationSubmissionResult`.
     fn check_is_end(&mut self, member_count: usize, digest: H256) -> VerificationSubmissionResult {
         let mut is_end = false;
-        self.status.entry(digest)
+        self.status
+            .entry(digest)
             .and_modify(|v| {
                 *v = v.saturating_add(1);
-                    if *v >= self.threshold {
-                        is_end = true;
-                    }
+                if *v >= self.threshold {
+                    is_end = true;
+                }
             })
             .or_insert(1);
 
@@ -115,7 +116,7 @@ impl<T: Config> VerificationSubmission<T> {
         }
     }
 
-    /// Update the treshold of `VerificationSubmission` based on member count. 
+    /// Update the treshold of `VerificationSubmission` based on member count.
     /// `Threshold = (membmer_count * 3 / 5) + remainder`
     pub fn update_threshold(&mut self, member_count: usize) {
         let threshold = (member_count * 3 / 5) as Threshold;
@@ -502,10 +503,10 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         matches!(self.status, UpdateStatus::Available)
     }
 
-    /// Handle on `UpdateStatus::Available`. 
-    /// 
+    /// Handle on `UpdateStatus::Available`.
+    ///
     /// 1. Set its _remaining_threshold_ to threshold of `URAuthDoc`
-    /// 2. Set its `UpdateStatus` to `UpdateStatus::InProgress`. 
+    /// 2. Set its `UpdateStatus` to `UpdateStatus::InProgress`.
     /// Define its variant to `"to be updated"` field and _proofs_ to be `None`
     pub fn handle_available(
         &mut self,
@@ -513,14 +514,17 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         update_doc_field: UpdateDocField<Account>,
     ) {
         self.remaining_threshold = threshold;
-        self.status = UpdateStatus::InProgress { field: update_doc_field, proofs: None };
+        self.status = UpdateStatus::InProgress {
+            field: update_doc_field,
+            proofs: None,
+        };
     }
 
     /// Handle on `UpdateStatus::InProgress`
-    /// 
-    /// 1. Add proof 
+    ///
+    /// 1. Add proof
     /// 2. Decrease its threshold with amount of _did_weight_
-    /// 
+    ///
     /// ## Error
     /// `ProofMissing`
     pub fn handle_in_progress(
@@ -531,7 +535,10 @@ impl<Account: Clone> UpdateDocStatus<Account> {
     ) -> Result<(), UpdateDocStatusError> {
         if let Some(proofs) = self.add_proof(proof) {
             self.calc_remaining_threshold(did_weight);
-            self.status = UpdateStatus::InProgress { field: update_doc_field, proofs: Some(proofs) };
+            self.status = UpdateStatus::InProgress {
+                field: update_doc_field,
+                proofs: Some(proofs),
+            };
         } else {
             return Err(UpdateDocStatusError::ProofMissing.into());
         }
@@ -564,7 +571,7 @@ impl<Account: Clone> UpdateDocStatus<Account> {
         maybe_proofs
     }
 
-    /// Decrease threshold with amount to _did_weight. 
+    /// Decrease threshold with amount to _did_weight.
     fn calc_remaining_threshold(&mut self, did_weight: DIDWeight) {
         self.remaining_threshold = self.remaining_threshold.saturating_sub(did_weight);
     }
