@@ -23,6 +23,10 @@ log = { version = "0.4.17", default-features = false }
 scale-info = { version = "2.3.1", default-features = false, features = ["derive"] }
 smallvec = "1.10.0"
 
+# Local
+pallet-urauth = { version = "0.1.0", default-features = false, path = "../pallets/urauth" }
+pallet-urauth-runtime-api = { version = "0.1.0", default-features = false, path = "../pallets/urauth/runtime-api" }
+
 # Substrate
 pallet-system-token-payment = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 pallet-assets = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
@@ -100,7 +104,12 @@ std = [
 	"frame-support/std",
 	"frame-system-rpc-runtime-api/std",
 	"frame-system/std",
+	"frame-system-benchmarking/std",
 	"pallet-assets/std",
+	"pallet-asset-link/std",
+	"xcm-primitives/std",
+	"frame-benchmarking/std",
+	"frame-try-runtime/std",
 	"pallet-system-token-payment/std",
 	"pallet-aura/std",
 	"pallet-authorship/std",
@@ -133,6 +142,8 @@ std = [
 	"xcm/std",
 	"assets-common/std",
 	"parachains-common/std",
+	"pallet-urauth/std",
+	"pallet-urauth-runtime-api/std"
 ]
 
 runtime-benchmarks = [

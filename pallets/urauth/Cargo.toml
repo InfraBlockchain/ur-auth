@@ -1,0 +1,64 @@
+[package]
+name = "pallet-urauth"
+authors = ["blockchain labs"]
+description = "URAuth pallet"
+version = "0.1.0"
+license = "Unlicense"
+homepage = "https://bc-labs.net/"
+repository = "https://github.com/InfraBlockchain/infra-substrate/"
+edition = "2021"
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
+[dependencies]
+codec = { package = "parity-scale-codec", version = "3.0.0", features = [
+	"derive",
+], default-features = false }
+scale-info = { version = "2.2.0", default-features = false, features = ["derive"] }
+lite-json = { version = "0.2.0", default-features = false }
+bs58 = { version = "0.4.0", default-features = false }
+nuuid = { version = "0.5.0", default-features = false }
+fixedstr = {version = "0.4", default-features = false }
+hex = { version = "0.4.3", default-features = false }
+log = { version = "0.4.17", default-features = false }
+serde = { version = "1.0.136", optional = true, features = ["derive"] }
+
+# Substrate
+frame-benchmarking = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, optional = true, branch = "master" }
+frame-support = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+frame-system = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+sp-runtime = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+sp-core = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+sp-std = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+sp-io = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+sp-consensus-vrf = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+
+
+[dev-dependencies]
+sp-keyring = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+pallet-timestamp = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+
+[features]
+default = ["std"]
+runtime-benchmarks = ["frame-benchmarking/runtime-benchmarks"]
+std = [
+    "log/std",
+	"codec/std",
+	"scale-info/std",
+    "lite-json/std",
+    "bs58/std",
+    "nuuid/std",
+    "fixedstr/std",
+    "hex/std",
+    "serde",
+	"frame-benchmarking/std",
+	"frame-support/std",
+	"frame-system/std",
+    "sp-runtime/std",
+    "sp-core/std",
+    "sp-std/std",
+    "sp-consensus-vrf/std",
+    "sp-io/std",
+]
+try-runtime = ["frame-support/try-runtime"]
