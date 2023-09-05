@@ -19,6 +19,8 @@ pub use pallet::*;
 pub mod types;
 pub use types::*;
 
+pub mod challenge;
+
 #[cfg(test)]
 pub mod mock;
 
