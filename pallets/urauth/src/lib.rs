@@ -421,6 +421,33 @@ pub mod pallet {
             Ok(())
         }
 
+        #[pallet::call_index(3)]
+        #[pallet::weight(1_000)]
+        pub fn claim_file_ownership(
+            origin: OriginFor<T>,
+            cid: Vec<u8>,
+            owner_did: OwnerDID,
+            signer: MultiSigner,
+            proof: MultiSignature
+        ) -> DispatchResult {
+
+            let _ = ensure_signed(origin)?;
+            let uri = URI::new(cid);
+            Self::verify_request_proof(&uri, &owner_did, &proof, signer)?; 
+            let owner = Self::account_id_from_source(AccountIdSource::DID(owner_did))?;
+            let (count, urauth_doc) = Self::new_urauth_doc(&uri, owner)?;
+            URAuthTree::<T>::insert(&uri, urauth_doc.clone());
+            Self::deposit_event(
+                Event::<T>::URAuthTreeRegistered {
+                    count,
+                    uri,
+                    urauth_doc,
+                },
+            );
+            
+            Ok(())
+        }
+
         // Description:
         // This transaction involves adding members of the Oracle node to the verification request after downloading the Challenge Value.
         //
@@ -429,7 +456,7 @@ pub mod pallet {
         //
         // Params:
         // - who: Whom to be included as Oracle member
-        #[pallet::call_index(3)]
+        #[pallet::call_index(4)]
         #[pallet::weight(1_000)]
         pub fn add_oracle_member(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
             T::AuthorizedOrigin::ensure_origin(origin)?;
@@ -449,7 +476,7 @@ pub mod pallet {
         //
         // Params:
         // - randomness_enabled: Flag whether to create its randomness on-chain
-        #[pallet::call_index(4)]
+        #[pallet::call_index(5)]
         #[pallet::weight(1_000)]
         pub fn update_urauth_config(
             origin: OriginFor<T>,
@@ -479,6 +506,26 @@ impl<T: Config> Pallet<T> {
 
     fn challenge_value() -> Randomness {
         Default::default()
+    }
+
+    fn new_urauth_doc(uri: &URI, owner_did: T::AccountId) -> Result<(URAuthDocCount, URAuthDoc<T::AccountId>), DispatchError> {
+        let count = Counter::<T>::get();
+        Counter::<T>::try_mutate(|c| -> DispatchResult {
+            *c = c.checked_add(1).ok_or(Error::<T>::Overflow)?;
+            Ok(())
+        })?;
+
+        Ok(
+            (
+                count, 
+                URAuthDoc::new(
+                    Self::doc_id(count),
+                    uri.clone(),
+                    MultiDID::new(owner_did, 1),
+                    Self::unix_time(),
+                )
+            )
+        )
     }
 
     /// Verify `request` signature

@@ -6756,6 +6756,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-data-market"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "parity-scale-codec",
+ "scale-info",
+]
+
+[[package]]
 name = "pallet-democracy"
 version = "4.0.0-dev"
 source = "git+https://github.com/InfraBlockchain/infra-substrate?branch=master#c08c9aeb48966f57907d9fac59ec3b6e31255423"
