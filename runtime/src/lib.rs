@@ -541,6 +541,15 @@ impl pallet_urauth::Config for Runtime {
     type MaxOracleMembers = MaxOracleMembers;
 }
 
+parameter_types! {
+    pub const StringLimit: u32 = 128;
+}
+
+impl pallet_data_market::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type StringLimit = StringLimit;
+}
+
 // Create the runtime by composing the FRAME pallets that were previously configured.
 construct_runtime!(
     pub enum Runtime where
@@ -556,6 +565,7 @@ construct_runtime!(
         Sudo: pallet_sudo::{Pallet, Call, Storage, Config<T>, Event<T>} = 4,
 
         URAuth: pallet_urauth::{Pallet, Call, Storage, Config<T>, Event<T>} = 5,
+        DataMarket: pallet_data_market::{Pallet, Call, Storage, Event<T>} = 6,
 
         // Monetary stuff.
         Balances: pallet_balances = 10,

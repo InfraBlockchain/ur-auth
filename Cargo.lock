@@ -6759,10 +6759,13 @@ dependencies = [
 name = "pallet-data-market"
 version = "0.1.0"
 dependencies = [
+ "frame-benchmarking",
  "frame-support",
  "frame-system",
+ "log",
  "parity-scale-codec",
  "scale-info",
+ "serde",
  "sp-std",
 ]
 
@@ -7599,6 +7602,7 @@ dependencies = [
  "pallet-authorship",
  "pallet-balances",
  "pallet-collator-selection",
+ "pallet-data-market",
  "pallet-session",
  "pallet-sudo",
  "pallet-system-token",

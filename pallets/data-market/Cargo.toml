@@ -16,7 +16,24 @@ codec = { package = "parity-scale-codec", version = "3.0.0", default-features = 
 	"derive",
 ] }
 scale-info = { version = "2.2.0", default-features = false, features = ["derive"] }
+log = { version = "0.4.17", default-features = false }
+serde = { version = "1.0.136", optional = true, features = ["derive"] }
 
+frame-benchmarking = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, optional = true, branch = "master" }
 frame-support = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 frame-system = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 sp-std = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+
+[features]
+default = ["std"]
+runtime-benchmarks = ["frame-benchmarking/runtime-benchmarks"]
+std = [
+    "log/std",
+	"codec/std",
+    "serde/std",
+	"frame-benchmarking/std",
+	"frame-support/std",
+	"frame-system/std",
+    "sp-std/std",
+]
+try-runtime = ["frame-support/try-runtime"]
