@@ -28,9 +28,6 @@ pub mod tests;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 
-#[cfg(feature = "runtime-benchmarks")]
-mod benchmarking;
-
 #[frame_support::pallet]
 pub mod pallet {
 
@@ -444,7 +441,7 @@ pub mod pallet {
                     urauth_doc,
                 },
             );
-            
+
             Ok(())
         }
 
@@ -495,9 +492,15 @@ pub mod pallet {
 
 impl<T: Config> Pallet<T> {
     /// 16 bytes uuid based on `URAuthDocCount`
-    fn doc_id(index: u128) -> [u8; 16] {
-        let b = index.to_le_bytes();
-        nuuid::Uuid::from_bytes(b).to_bytes()
+    fn doc_id() -> Result<(u128, DocId), DispatchError> {
+        let count = Counter::<T>::get();
+        Counter::<T>::try_mutate(|c| -> DispatchResult {
+            *c = c.checked_add(1).ok_or(Error::<T>::Overflow)?;
+            Ok(())
+        })?;
+        let b = count.to_le_bytes();
+
+        Ok((count, nuuid::Uuid::from_bytes(b).to_bytes()))
     }
 
     fn unix_time() -> u128 {
@@ -509,17 +512,12 @@ impl<T: Config> Pallet<T> {
     }
 
     fn new_urauth_doc(uri: &URI, owner_did: T::AccountId) -> Result<(URAuthDocCount, URAuthDoc<T::AccountId>), DispatchError> {
-        let count = Counter::<T>::get();
-        Counter::<T>::try_mutate(|c| -> DispatchResult {
-            *c = c.checked_add(1).ok_or(Error::<T>::Overflow)?;
-            Ok(())
-        })?;
-
+        let (count, doc_id) = Self::doc_id()?;
         Ok(
             (
                 count, 
                 URAuthDoc::new(
-                    Self::doc_id(count),
+                    doc_id,
                     uri.clone(),
                     MultiDID::new(owner_did, 1),
                     Self::unix_time(),
@@ -569,14 +567,10 @@ impl<T: Config> Pallet<T> {
     ) -> Result<(), DispatchError> {
         match res {
             VerificationSubmissionResult::Complete => {
-                let mut count = Counter::<T>::get();
-                count = count.checked_add(1).ok_or(Error::<T>::Overflow)?;
-                let urauth_doc: URAuthDoc<T::AccountId> = URAuthDoc::new(
-                    Self::doc_id(count),
-                    uri.clone(),
-                    MultiDID::new(owner_did, 1),
-                    Self::unix_time(),
-                );
+                let (count, urauth_doc) = Self::new_urauth_doc(
+                    uri,
+                    owner_did
+                )?;
                 Counter::<T>::put(count);
                 URAuthTree::<T>::insert(&uri, urauth_doc.clone());
                 Self::remove_all_uri_related(uri.clone());
