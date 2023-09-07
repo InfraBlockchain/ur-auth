@@ -6,29 +6,15 @@ use scale_info::TypeInfo;
 use serde::{Deserialize, Serialize};
 use sp_runtime::RuntimeDebug;
 use sp_std::collections::btree_map::BTreeMap;
+pub use max_size::*;
 
 pub type DIDWeight = u16;
 pub type OwnerDID = Vec<u8>;
 pub type DocId = [u8; 16];
-pub type DomainName = Vec<u8>;
 pub type ApprovalCount = u32;
 pub type Threshold = u32;
 pub type URAuthDocCount = u128;
 pub type RemainingThreshold = u16;
-
-/// Opaque bytes of uri
-#[derive(Encode, Decode, Clone, PartialEq, Eq, Default, RuntimeDebug, TypeInfo)]
-pub struct URI(pub Vec<u8>);
-
-impl URI {
-    pub fn new(raw: Vec<u8>) -> Self {
-        Self(raw)
-    }
-
-    pub fn inner(&self) -> Vec<u8> {
-        self.0.clone()
-    }
-}
 
 /// Metadata for verifying challenge value
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
@@ -171,6 +157,7 @@ pub enum URAuthSignedPayload<Account> {
         timestamp: Vec<u8>,
     },
     Update {
+        uri: URI,
         urauth_doc: URAuthDoc<Account>,
         owner_did: OwnerDID,
     },
@@ -187,12 +174,12 @@ impl<Account: Encode> Encode for URAuthSignedPayload<Account> {
                 timestamp,
             } => (uri, owner_did, challenge, timestamp).encode(),
             URAuthSignedPayload::Update {
+                uri,
                 urauth_doc,
                 owner_did,
             } => {
                 let URAuthDoc {
                     id,
-                    uri,
                     created_at,
                     updated_at,
                     multi_owner_did,
@@ -204,8 +191,8 @@ impl<Account: Encode> Encode for URAuthSignedPayload<Account> {
                 } = urauth_doc;
 
                 (
-                    id,
                     uri,
+                    id,
                     created_at,
                     updated_at,
                     multi_owner_did,
@@ -366,7 +353,6 @@ pub enum Proof {
 #[derive(Encode, Decode, Clone, PartialEq, Debug, Eq, TypeInfo)]
 pub struct URAuthDoc<Account> {
     pub id: DocId,
-    pub uri: URI,
     pub created_at: u128,
     pub updated_at: u128,
     pub multi_owner_did: MultiDID<Account>,
@@ -375,16 +361,17 @@ pub struct URAuthDoc<Account> {
     pub copyright_info: Option<CopyrightInfo>,
     pub access_rules: Option<Vec<AccessRule>>,
     pub proofs: Option<Vec<Proof>>,
+    pub asset: Option<MultiAsset>,
+    pub data_source: Option<Vec<u8>>,
 }
 
 impl<Account> URAuthDoc<Account>
 where
     Account: PartialEq + Clone,
 {
-    pub fn new(id: DocId, uri: URI, multi_owner_did: MultiDID<Account>, created_at: u128) -> Self {
+    pub fn new(id: DocId, multi_owner_did: MultiDID<Account>, created_at: u128) -> Self {
         Self {
             id,
-            uri,
             multi_owner_did,
             created_at,
             updated_at: created_at,
@@ -393,15 +380,13 @@ where
             copyright_info: None,
             access_rules: None,
             proofs: None,
+            asset: None,
+            data_source: None, 
         }
     }
 
     pub fn get_threshold(&self) -> DIDWeight {
         self.multi_owner_did.threshold
-    }
-
-    pub fn get_uri(&self) -> URI {
-        self.uri.clone()
     }
 
     pub fn get_multi_did(&self) -> MultiDID<Account> {
@@ -607,4 +592,19 @@ impl sp_runtime::traits::Printable for UpdateDocStatusError {
             Self::ProofMissing => "PrrofMissingOnUpdate".print(),
         }
     }
+}
+
+pub mod max_size {
+    
+    use super::*;
+
+    /// URI is up to 3 KB
+    pub const MAX_URI_SIZE: u32 = 3 * 1024;
+
+    pub type URI = BoundedVec<u8, ConstU32<MAX_URI_SIZE>>;
+
+    /// Owner did is up to 64 bytes
+    pub const MAX_OWNER_DID: u32 = 64;
+
+    pub type BoundedOwnerDID = BoundedVec<u8, ConstU32<MAX_URI_SIZE>>;
 }

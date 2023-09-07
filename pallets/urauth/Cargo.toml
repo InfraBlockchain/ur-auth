@@ -34,6 +34,7 @@ sp-std = { git = "https://github.com/InfraBlockchain/infra-substrate", default-f
 sp-io = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 sp-consensus-vrf = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 
+xcm = { git = "https://github.com/InfraBlockchain/infra-relay-chain", branch = "master" }
 
 [dev-dependencies]
 sp-keyring = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
@@ -60,5 +61,6 @@ std = [
     "sp-std/std",
     "sp-consensus-vrf/std",
     "sp-io/std",
+    "xcm/std",
 ]
 try-runtime = ["frame-support/try-runtime"]

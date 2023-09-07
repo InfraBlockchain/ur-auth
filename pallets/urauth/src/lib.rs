@@ -3,7 +3,7 @@
 use codec::Encode;
 use fixedstr::zstr;
 
-use frame_support::{pallet_prelude::*, traits::UnixTime, BoundedVec};
+use frame_support::{pallet_prelude::*, traits::{UnixTime, ConstU32}, BoundedVec};
 
 use frame_system::pallet_prelude::*;
 use sp_consensus_vrf::schnorrkel::Randomness;
@@ -13,6 +13,7 @@ use sp_runtime::{
     AccountId32, MultiSignature, MultiSigner,
 };
 use sp_std::vec::Vec;
+use xcm::latest::MultiAsset;
 
 pub use pallet::*;
 
@@ -235,6 +236,8 @@ pub mod pallet {
         BadChallengeValue,
         /// Error on verifying challenge before requesting its ownership.
         BadRequest,
+        /// Size of URI is over limit of `MAX_URI_SIZE`
+        BadURI,
         /// Error on converting raw-json to json-string.
         ErrorConvertToString,
         /// Error on converting raw-signature to concrete type signature.
@@ -292,17 +295,17 @@ pub mod pallet {
         // 3. If the signature is valid, generate a metadata(owner_did, challenge_value)
         #[pallet::call_index(0)]
         #[pallet::weight(1_000)]
-        pub fn urauth_request_register_domain_owner(
+        pub fn urauth_request_register_ownership(
             origin: OriginFor<T>,
-            uri: URI,
+            uri: Vec<u8>,
             owner_did: OwnerDID,
             challenge_value: Option<Randomness>,
             signer: MultiSigner,
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-
-            Self::verify_request_proof(&uri, &owner_did, &proof, signer)?;
+            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::BadURI)?;
+            Self::verify_request_proof(&bounded_uri, &owner_did, &proof, signer)?;
 
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
@@ -310,10 +313,10 @@ pub mod pallet {
                 challenge_value.ok_or(Error::<T>::ChallengeValueNotProvided)?
             };
 
-            ChallengeValue::<T>::insert(&uri, cv);
-            URIMetadata::<T>::insert(&uri, Metadata::new(owner_did, cv));
+            ChallengeValue::<T>::insert(&bounded_uri, cv);
+            URIMetadata::<T>::insert(&bounded_uri, Metadata::new(owner_did, cv));
 
-            Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri });
+            Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri: bounded_uri });
 
             Ok(())
         }
@@ -406,10 +409,11 @@ pub mod pallet {
             let _ = ensure_signed(origin)?;
             let (mut updated_urauth_doc, mut update_doc_status) =
                 Self::try_update_urauth_doc(&uri, &update_doc_field, updated_at, proof.clone())?;
-            let (owner, proof) = Self::try_verify_urauth_doc_proof(&updated_urauth_doc, proof)?;
+            let (owner, proof) = Self::try_verify_urauth_doc_proof(&uri, &updated_urauth_doc, proof)?;
             Self::try_store_updated_urauth_doc(
                 owner,
                 proof,
+                uri,
                 &mut updated_urauth_doc,
                 &mut update_doc_status,
                 update_doc_field,
@@ -518,7 +522,6 @@ impl<T: Config> Pallet<T> {
                 count, 
                 URAuthDoc::new(
                     doc_id,
-                    uri.clone(),
                     MultiDID::new(owner_did, 1),
                     Self::unix_time(),
                 )
@@ -678,12 +681,12 @@ impl<T: Config> Pallet<T> {
     fn handle_updated_urauth_doc(
         signer: AccountId32,
         proof: Proof,
+        uri: URI,
         urauth_doc: &mut URAuthDoc<T::AccountId>,
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
         update_doc_field: UpdateDocField<T::AccountId>,
     ) -> Result<(), DispatchError> {
         let multi_did = urauth_doc.get_multi_did();
-        let uri = urauth_doc.get_uri();
         let account_id = Pallet::<T>::account_id_from_source(AccountIdSource::AccountId32(signer))?;
         let did_weight = multi_did
             .get_did_weight(&account_id)
@@ -720,6 +723,7 @@ impl<T: Config> Pallet<T> {
     ///
     /// `BadProof` : Signature is not valid
     fn try_verify_urauth_doc_proof(
+        uri: &URI,
         urauth_doc: &URAuthDoc<T::AccountId>,
         proof: Option<Proof>,
     ) -> Result<(AccountId32, Proof), DispatchError> {
@@ -731,6 +735,7 @@ impl<T: Config> Pallet<T> {
             return Err(Error::<T>::NotURAuthDocOwner.into());
         }
         let payload = URAuthSignedPayload::<T::AccountId>::Update {
+            uri: uri.clone(),
             urauth_doc: urauth_doc.clone(),
             owner_did: owner_did.clone(),
         };
@@ -746,6 +751,7 @@ impl<T: Config> Pallet<T> {
     fn try_store_updated_urauth_doc(
         signer: AccountId32,
         proof: Proof,
+        uri: URI,
         urauth_doc: &mut URAuthDoc<T::AccountId>,
         update_doc_status: &mut UpdateDocStatus<T::AccountId>,
         updated_doc_field: UpdateDocField<T::AccountId>,
@@ -753,6 +759,7 @@ impl<T: Config> Pallet<T> {
         Self::handle_updated_urauth_doc(
             signer,
             proof,
+            uri,
             urauth_doc,
             update_doc_status,
             updated_doc_field,

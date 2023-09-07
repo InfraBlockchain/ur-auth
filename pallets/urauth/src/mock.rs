@@ -119,8 +119,8 @@ impl<Account: Encode> MockURAuthHelper<Account> {
         }
     }
 
-    pub fn deconstruct_urauth_doc(&self) -> (URI, Vec<u8>, Vec<u8>, Vec<u8>) {
-        self.mock_doc_manager.deconstruct()
+    pub fn deconstruct_urauth_doc(&self, uri: Option<String>) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+        self.mock_doc_manager.deconstruct(uri)
     }
 
     pub fn create_raw_payload(&mut self, proof_type: ProofType<Account>) -> Vec<u8> {
@@ -144,8 +144,8 @@ impl<Account: Encode> MockURAuthHelper<Account> {
         self.mock_prover.create_signature(signer, proof_type)
     }
 
-    pub fn to_uri(&self) -> URI {
-        self.mock_doc_manager.to_uri()
+    pub fn bounded_uri(&self, of: Option<String>) -> URI {
+        self.mock_doc_manager.bounded_uri(of)
     }
 
     pub fn owner_did(&self) -> String {
@@ -178,7 +178,7 @@ impl<Account: Encode> MockURAuthHelper<Account> {
 pub enum ProofType<Account: Encode> {
     Request(URI, OwnerDID),
     Challenge(URI, OwnerDID, Vec<u8>, Vec<u8>),
-    Update(URAuthDoc<Account>, Vec<u8>),
+    Update(URI, URAuthDoc<Account>, Vec<u8>),
 }
 
 pub struct MockProver<Account>(PhantomData<Account>);
@@ -190,10 +190,9 @@ impl<Account: Encode> MockProver<Account> {
             ProofType::Challenge(uri, owner_did, challenge, timestamp) => {
                 (uri, owner_did, challenge, timestamp).encode()
             }
-            ProofType::Update(urauth_doc, owner_did) => {
+            ProofType::Update(uri, urauth_doc, owner_did) => {
                 let URAuthDoc {
                     id,
-                    uri,
                     created_at,
                     updated_at,
                     multi_owner_did,
@@ -205,8 +204,8 @@ impl<Account: Encode> MockProver<Account> {
                 } = urauth_doc;
 
                 (
-                    id,
                     uri,
+                    id,
                     created_at,
                     updated_at,
                     multi_owner_did,
@@ -275,12 +274,13 @@ impl MockURAuthDocManager {
         }
     }
 
-    fn to_uri(&self) -> URI {
-        URI(self.uri.as_bytes().to_vec())
+    fn bounded_uri(&self, of: Option<String>) -> URI {
+        let opaque_uri = of.map_or(self.uri.as_bytes().to_vec(), |s| s.as_bytes().to_vec());
+        opaque_uri.try_into().expect("Too Long") 
     }
 
-    fn deconstruct(&self) -> (URI, Vec<u8>, Vec<u8>, Vec<u8>) {
-        let uri = self.to_uri();
+    fn deconstruct(&self, uri: Option<String>) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+        let uri = uri.map_or(self.uri.as_bytes().to_vec(), |s| s.as_bytes().to_vec());
         (
             uri,
             self.owner_did.as_bytes().to_vec(),
