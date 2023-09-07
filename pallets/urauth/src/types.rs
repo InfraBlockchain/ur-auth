@@ -9,7 +9,6 @@ use sp_std::collections::btree_map::BTreeMap;
 pub use max_size::*;
 
 pub type DIDWeight = u16;
-pub type OwnerDID = Vec<u8>;
 pub type DocId = [u8; 16];
 pub type ApprovalCount = u32;
 pub type Threshold = u32;
@@ -17,14 +16,14 @@ pub type URAuthDocCount = u128;
 pub type RemainingThreshold = u16;
 
 /// Metadata for verifying challenge value
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub struct Metadata {
-    pub owner_did: Vec<u8>,
+    pub owner_did: OwnerDID,
     pub challenge_value: Randomness,
 }
 
 impl Metadata {
-    pub fn new(owner_did: Vec<u8>, challenge_value: Randomness) -> Self {
+    pub fn new(owner_did: OwnerDID, challenge_value: Randomness) -> Self {
         Self {
             owner_did,
             challenge_value,
@@ -287,35 +286,35 @@ impl<Account: PartialEq> MultiDID<Account> {
     }
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum StorageProvider {
     IPFS,
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub struct ContentAddress {
     storage_provider: StorageProvider,
-    cid: Vec<u8>,
+    cid: URI,
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum ContentMetadata {
     MetadataV1 { content_address: ContentAddress },
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum CopyrightInfo {
-    Text(Vec<u8>),
+    Text(AnyText),
     CopyrightInfoV1 { content_address: ContentAddress },
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum AccessRule {
-    AccessRuleV1 { path: Vec<u8>, rules: Vec<Rule> },
+    AccessRuleV1 { path: AnyText, rules: Vec<Rule> },
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct UserAgent(pub Vec<u8>);
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub struct UserAgent(pub AnyText);
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct Rule {
@@ -345,9 +344,9 @@ pub enum ContentType {
     Code,
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum Proof {
-    ProofV1 { did: Vec<u8>, proof: MultiSignature },
+    ProofV1 { did: OwnerDID, proof: MultiSignature },
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Debug, Eq, TypeInfo)]
@@ -356,13 +355,13 @@ pub struct URAuthDoc<Account> {
     pub created_at: u128,
     pub updated_at: u128,
     pub multi_owner_did: MultiDID<Account>,
-    pub identity_info: Option<Vec<Vec<u8>>>,
+    pub identity_info: Option<Vec<AnyText>>,
     pub content_metadata: Option<ContentMetadata>,
     pub copyright_info: Option<CopyrightInfo>,
     pub access_rules: Option<Vec<AccessRule>>,
     pub proofs: Option<Vec<Proof>>,
     pub asset: Option<MultiAsset>,
-    pub data_source: Option<Vec<u8>>,
+    pub data_source: Option<URI>,
 }
 
 impl<Account> URAuthDoc<Account>
@@ -450,7 +449,7 @@ where
 pub enum UpdateDocField<Account> {
     MultiDID(WeightedDID<Account>),
     Threshold(DIDWeight),
-    IdentityInfo(Option<Vec<Vec<u8>>>),
+    IdentityInfo(Option<Vec<AnyText>>),
     ContentMetadata(Option<ContentMetadata>),
     CopyrightInfo(Option<CopyrightInfo>),
     AccessRules(Option<Vec<AccessRule>>),
@@ -604,7 +603,12 @@ pub mod max_size {
     pub type URI = BoundedVec<u8, ConstU32<MAX_URI_SIZE>>;
 
     /// Owner did is up to 64 bytes
-    pub const MAX_OWNER_DID: u32 = 64;
+    pub const MAX_OWNER_DID_SIZE: u32 = 64;
 
-    pub type BoundedOwnerDID = BoundedVec<u8, ConstU32<MAX_URI_SIZE>>;
+    pub type OwnerDID = BoundedVec<u8, ConstU32<MAX_OWNER_DID_SIZE>>;
+
+    /// Common size is up to 100 bytes
+    pub const MAX_COMMON_SIZE: u32 = 100;
+
+    pub type AnyText = BoundedVec<u8, ConstU32<MAX_COMMON_SIZE>>;
 }

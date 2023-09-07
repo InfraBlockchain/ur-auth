@@ -152,8 +152,8 @@ impl<Account: Encode> MockURAuthHelper<Account> {
         self.mock_doc_manager.owner_did.clone()
     }
 
-    pub fn raw_owner_did(&self) -> Vec<u8> {
-        self.mock_doc_manager.owner_did.as_bytes().to_vec()
+    pub fn raw_owner_did(&self) -> OwnerDID {
+        self.mock_doc_manager.owner_did.as_bytes().to_vec().try_into().expect("Too long!")
     }
 
     pub fn challenge_value(&self) -> Randomness {
@@ -178,7 +178,7 @@ impl<Account: Encode> MockURAuthHelper<Account> {
 pub enum ProofType<Account: Encode> {
     Request(URI, OwnerDID),
     Challenge(URI, OwnerDID, Vec<u8>, Vec<u8>),
-    Update(URI, URAuthDoc<Account>, Vec<u8>),
+    Update(URI, URAuthDoc<Account>, OwnerDID),
 }
 
 pub struct MockProver<Account>(PhantomData<Account>);

@@ -65,7 +65,6 @@ pub mod pallet {
     pub type URAuthTree<T: Config> = StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId>>;
 
     #[pallet::storage]
-    #[pallet::unbounded]
     /// **Description:**
     ///
     /// Temporarily store the URIMetadata(owner_did and challenge_value) for the unverified URI in preparation for its verification.
@@ -236,8 +235,8 @@ pub mod pallet {
         BadChallengeValue,
         /// Error on verifying challenge before requesting its ownership.
         BadRequest,
-        /// Size of URI is over limit of `MAX_URI_SIZE`
-        BadURI,
+        /// Size is over limit of `MAX_*`
+        OverMaxSize,
         /// Error on converting raw-json to json-string.
         ErrorConvertToString,
         /// Error on converting raw-signature to concrete type signature.
@@ -298,14 +297,15 @@ pub mod pallet {
         pub fn urauth_request_register_ownership(
             origin: OriginFor<T>,
             uri: Vec<u8>,
-            owner_did: OwnerDID,
+            owner_did: Vec<u8>,
             challenge_value: Option<Randomness>,
             signer: MultiSigner,
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::BadURI)?;
-            Self::verify_request_proof(&bounded_uri, &owner_did, &proof, signer)?;
+            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            let bounded_owner_did: OwnerDID = owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
 
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
@@ -314,7 +314,7 @@ pub mod pallet {
             };
 
             ChallengeValue::<T>::insert(&bounded_uri, cv);
-            URIMetadata::<T>::insert(&bounded_uri, Metadata::new(owner_did, cv));
+            URIMetadata::<T>::insert(&bounded_uri, Metadata::new(bounded_owner_did, cv));
 
             Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri: bounded_uri });
 
@@ -348,7 +348,7 @@ pub mod pallet {
             );
 
             // Parse json
-            let (sig, proof_type, raw_payload, uri, raw_owner_did, challenge) =
+            let (sig, proof_type, raw_payload, uri, owner_did, challenge) =
                 Self::try_handle_challenge_value(&challenge_value)?;
 
             // 1. OwnerDID of URI == Challenge Value's DID
@@ -358,7 +358,7 @@ pub mod pallet {
                 proof_type,
                 raw_payload,
                 &uri,
-                &raw_owner_did,
+                &owner_did,
                 challenge,
             )?;
             let member_count = Self::oracle_members().len();
@@ -427,21 +427,22 @@ pub mod pallet {
         pub fn claim_file_ownership(
             origin: OriginFor<T>,
             cid: Vec<u8>,
-            owner_did: OwnerDID,
+            owner_did: Vec<u8>,
             signer: MultiSigner,
             proof: MultiSignature
         ) -> DispatchResult {
 
             let _ = ensure_signed(origin)?;
-            let uri = URI::new(cid);
-            Self::verify_request_proof(&uri, &owner_did, &proof, signer)?; 
-            let owner = Self::account_id_from_source(AccountIdSource::DID(owner_did))?;
-            let (count, urauth_doc) = Self::new_urauth_doc(&uri, owner)?;
-            URAuthTree::<T>::insert(&uri, urauth_doc.clone());
+            let bounded_uri: URI = cid.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            let bounded_owner_did: OwnerDID = owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?; 
+            let owner = Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
+            let (count, urauth_doc) = Self::new_urauth_doc(owner)?;
+            URAuthTree::<T>::insert(&bounded_uri, urauth_doc.clone());
             Self::deposit_event(
                 Event::<T>::URAuthTreeRegistered {
                     count,
-                    uri,
+                    uri: bounded_uri,
                     urauth_doc,
                 },
             );
@@ -515,7 +516,7 @@ impl<T: Config> Pallet<T> {
         Default::default()
     }
 
-    fn new_urauth_doc(uri: &URI, owner_did: T::AccountId) -> Result<(URAuthDocCount, URAuthDoc<T::AccountId>), DispatchError> {
+    fn new_urauth_doc(owner_did: T::AccountId) -> Result<(URAuthDocCount, URAuthDoc<T::AccountId>), DispatchError> {
         let (count, doc_id) = Self::doc_id()?;
         Ok(
             (
@@ -570,10 +571,7 @@ impl<T: Config> Pallet<T> {
     ) -> Result<(), DispatchError> {
         match res {
             VerificationSubmissionResult::Complete => {
-                let (count, urauth_doc) = Self::new_urauth_doc(
-                    uri,
-                    owner_did
-                )?;
+                let (count, urauth_doc) = Self::new_urauth_doc(owner_did)?;
                 Counter::<T>::put(count);
                 URAuthTree::<T>::insert(&uri, urauth_doc.clone());
                 Self::remove_all_uri_related(uri.clone());
@@ -602,16 +600,16 @@ impl<T: Config> Pallet<T> {
         proof_type: Vec<u8>,
         raw_payload: Vec<u8>,
         uri: &URI,
-        raw_owner_did: &Vec<u8>,
+        owner_did: &OwnerDID,
         challenge: Vec<u8>,
     ) -> Result<T::AccountId, DispatchError> {
         let multi_sig = Self::raw_signature_to_multi_sig(&proof_type, &sig)?;
-        let signer = Self::account_id32_from_raw_did(raw_owner_did.clone())?;
+        let signer = Self::account_id32_from_raw_did(owner_did.to_vec())?;
         if !multi_sig.verify(&raw_payload[..], &signer) {
             return Err(Error::<T>::BadProof.into());
         }
         let uri_metadata = URIMetadata::<T>::get(uri).ok_or(Error::<T>::BadRequest)?;
-        let signer = Self::account_id_from_source(AccountIdSource::DID(raw_owner_did.clone()))?;
+        let signer = Self::account_id_from_source(AccountIdSource::DID(owner_did.to_vec()))?;
         Self::check_is_valid_owner(&uri_metadata.owner_did, &signer)
             .map_err(|_| Error::<T>::BadSigner)?;
         Self::check_challenge_value(uri, challenge)?;
@@ -730,7 +728,7 @@ impl<T: Config> Pallet<T> {
         let (owner_did, sig) = match proof.clone().ok_or(Error::<T>::ProofMissing)? {
             Proof::ProofV1 { did, proof } => (did, proof),
         };
-        let owner_account = Self::account_id_from_source(AccountIdSource::DID(owner_did.clone()))?;
+        let owner_account = Self::account_id_from_source(AccountIdSource::DID(owner_did.to_vec()))?;
         if !urauth_doc.multi_owner_did.is_owner(&owner_account) {
             return Err(Error::<T>::NotURAuthDocOwner.into());
         }
@@ -739,7 +737,7 @@ impl<T: Config> Pallet<T> {
             urauth_doc: urauth_doc.clone(),
             owner_did: owner_did.clone(),
         };
-        let signer = Pallet::<T>::account_id32_from_raw_did(owner_did)?;
+        let signer = Pallet::<T>::account_id32_from_raw_did(owner_did.to_vec())?;
         if !payload.using_encoded(|m| sig.verify(m, &signer)) {
             return Err(Error::<T>::BadProof.into());
         }
@@ -817,7 +815,7 @@ impl<T: Config> Pallet<T> {
     /// - Fail on parsing some fields
     fn try_handle_challenge_value(
         challenge_value: &Vec<u8>,
-    ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, URI, Vec<u8>, Vec<u8>), DispatchError> {
+    ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, URI, OwnerDID, Vec<u8>), DispatchError> {
         let json_str = sp_std::str::from_utf8(challenge_value)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
 
@@ -841,10 +839,11 @@ impl<T: Config> Pallet<T> {
                     hex::decode_to_slice(hex_proof, &mut proof as &mut [u8])
                         .map_err(|_| Error::<T>::ErrorDecodeHex)?;
                     let mut raw_payload: Vec<u8> = Default::default();
-                    let raw_owner_did = owner_did.clone();
+                    let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                    let bounded_owner_did: OwnerDID = owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?; 
                     URAuthSignedPayload::<T::AccountId>::Challenge {
-                        uri: URI::new(uri.clone()),
-                        owner_did,
+                        uri: bounded_uri.clone(),
+                        owner_did: bounded_owner_did.clone(),
                         challenge: challenge.clone(),
                         timestamp,
                     }
@@ -854,8 +853,8 @@ impl<T: Config> Pallet<T> {
                         proof.to_vec(),
                         proof_type,
                         raw_payload,
-                        URI::new(uri),
-                        raw_owner_did,
+                        bounded_uri,
+                        bounded_owner_did,
                         challenge,
                     ));
                 }
