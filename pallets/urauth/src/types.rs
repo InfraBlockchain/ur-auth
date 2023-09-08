@@ -436,7 +436,7 @@ where
             + u128::max_encoded_len()
             + MultiDID::<Account>::max_encoded_len()
             + IdentityInfo::max_encoded_len() * MAX_MULTI_OWNERS_NUM
-            + AccessRule::max_encoded_len()
+            + AccessRule::max_encoded_len() * MAX_ACCESS_RULES
             + CopyrightInfo::max_encoded_len()
             + ContentMetadata::max_encoded_len()
             + Proof::max_encoded_len() * MAX_MULTI_OWNERS_NUM
@@ -542,6 +542,15 @@ pub enum UpdateDocField<Account> {
     AccessRules(Option<Vec<AccessRule>>),
 }
 
+impl<Account> MaxEncodedLen for UpdateDocField<Account> 
+where 
+    Account: Encode
+{
+    fn max_encoded_len() -> usize {
+        AccessRule::max_encoded_len() * MAX_ACCESS_RULES
+    }
+}
+
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum UpdateStatus<Account> {
     /// Hold updated field and its proofs. Proofs will be stored on `URAuthDoc`
@@ -552,8 +561,18 @@ pub enum UpdateStatus<Account> {
     Available,
 }
 
+impl<Account> MaxEncodedLen for UpdateStatus<Account> 
+where
+    Account: Encode
+{
+    fn max_encoded_len() -> usize {
+        UpdateDocField::<Account>::max_encoded_len()
+            + Proof::max_encoded_len() * MAX_MULTI_OWNERS_NUM
+    }
+}
+
 /// Status for updating `URAuthDoc`
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub struct UpdateDocStatus<Account> {
     /// Threshold for updating
     pub remaining_threshold: DIDWeight,
@@ -690,7 +709,7 @@ pub mod max_size {
 
     /// Maximum number of `access_rules` we expect in a single `MultiDID` value. Note this is not (yet)
     /// enforced, and just serves to provide a sensible `max_encoded_len` for `MultiDID`.
-    pub const MAX_ACCESS_RULES: u32 = 10;
+    pub const MAX_ACCESS_RULES: usize = 100;
 
     /// Maximum number of `user agents` we expect in a single `MultiDID` value. Note this is not (yet)
     /// enforced, and just serves to provide a sensible `max_encoded_len` for `MultiDID`.

@@ -655,8 +655,11 @@ fn register_dataset_works() {
 
 #[test]
 fn max_encoded_len() {
+    println!("{:?}", IdentityInfo::max_encoded_len());
+    println!("{:?}", Rule::max_encoded_len());
+    println!("{:?}", AccessRule::max_encoded_len());
     println!(
-        "URAUTH DOCUMENT SIZE is {:?} KB",
-        URAuthDoc::<AccountId32>::max_encoded_len() as f32 / 1_000f32
+        "MAX URAUTH DOCUMENT SIZE is {:?} MB",
+        URAuthDoc::<AccountId32>::max_encoded_len() as f32 / 1_000_000f32
     );
 }

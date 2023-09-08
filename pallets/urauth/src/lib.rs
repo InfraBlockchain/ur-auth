@@ -129,7 +129,6 @@ pub mod pallet {
     ///
     /// UpdateDocStatus
     #[pallet::storage]
-    #[pallet::unbounded]
     pub type URAuthDocUpdateStatus<T: Config> =
         StorageMap<_, Blake2_128Concat, DocId, UpdateDocStatus<T::AccountId>, ValueQuery>;
 
