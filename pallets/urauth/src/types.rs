@@ -1,10 +1,10 @@
 use super::*;
 
 use codec::{Decode, Encode, MaxEncodedLen};
+pub use max_size::*;
 use scale_info::TypeInfo;
 use sp_runtime::RuntimeDebug;
 use sp_std::collections::btree_map::BTreeMap;
-pub use max_size::*;
 
 #[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
@@ -19,13 +19,16 @@ pub type URAuthDocCount = u128;
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum ClaimType {
     File,
-    Dataset { data_source: Option<Vec<u8>>, name: Vec<u8>, description: Vec<u8> }
+    Dataset {
+        data_source: Option<Vec<u8>>,
+        name: Vec<u8>,
+        description: Vec<u8>,
+    },
 }
 
 impl MaxEncodedLen for ClaimType {
     fn max_encoded_len() -> usize {
-        URI::max_encoded_len() 
-            + URI::max_encoded_len()
+        URI::max_encoded_len() + URI::max_encoded_len()
     }
 }
 
@@ -37,10 +40,7 @@ pub struct DataSetMetadata<BoundedString> {
 
 impl<BoundedString> DataSetMetadata<BoundedString> {
     pub fn new(name: BoundedString, description: BoundedString) -> Self {
-        Self {
-            name,
-            description
-        }
+        Self { name, description }
     }
 }
 
@@ -272,9 +272,9 @@ pub struct MultiDID<Account> {
     pub threshold: DIDWeight,
 }
 
-impl<Account> MaxEncodedLen for MultiDID<Account> 
+impl<Account> MaxEncodedLen for MultiDID<Account>
 where
-    Account: Encode + MaxEncodedLen
+    Account: Encode + MaxEncodedLen,
 {
     fn max_encoded_len() -> usize {
         WeightedDID::<Account>::max_encoded_len() * MAX_OWNER_DID_SIZE as usize
@@ -330,7 +330,7 @@ impl<Account: PartialEq> MultiDID<Account> {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum IdentityInfo {
-    IdentityInfoV1 { vc: VerfiableCredential }
+    IdentityInfoV1 { vc: VerfiableCredential },
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -362,8 +362,7 @@ pub enum AccessRule {
 
 impl MaxEncodedLen for AccessRule {
     fn max_encoded_len() -> usize {
-        AnyText::max_encoded_len() 
-        + Rule::max_encoded_len() * MAX_RULES_NUM
+        AnyText::max_encoded_len() + Rule::max_encoded_len() * MAX_RULES_NUM
     }
 }
 
@@ -377,7 +376,7 @@ pub struct Rule {
 impl MaxEncodedLen for Rule {
     fn max_encoded_len() -> usize {
         UserAgent::max_encoded_len() * MAX_USER_AGENTS_NUM
-        + (ContentType::max_encoded_len() + Price::max_encoded_len()) * 4
+            + (ContentType::max_encoded_len() + Price::max_encoded_len()) * 4
     }
 }
 
@@ -406,7 +405,10 @@ pub enum ContentType {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum Proof {
-    ProofV1 { did: OwnerDID, proof: MultiSignature },
+    ProofV1 {
+        did: OwnerDID,
+        proof: MultiSignature,
+    },
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Debug, Eq, TypeInfo)]
@@ -424,22 +426,22 @@ pub struct URAuthDoc<Account> {
     pub proofs: Option<Vec<Proof>>,
 }
 
-impl<Account> MaxEncodedLen for URAuthDoc<Account> 
+impl<Account> MaxEncodedLen for URAuthDoc<Account>
 where
-    Account: Encode + MaxEncodedLen
+    Account: Encode + MaxEncodedLen,
 {
     fn max_encoded_len() -> usize {
-        DocId::max_encoded_len() 
-        + u128::max_encoded_len() 
-        + u128::max_encoded_len()
-        + MultiDID::<Account>::max_encoded_len()
-        + IdentityInfo::max_encoded_len() * MAX_MULTI_OWNERS_NUM
-        + AccessRule::max_encoded_len() 
-        + CopyrightInfo::max_encoded_len() 
-        + ContentMetadata::max_encoded_len() 
-        + Proof::max_encoded_len() * MAX_MULTI_OWNERS_NUM
-        + MultiAsset::max_encoded_len() 
-        + URI::max_encoded_len() 
+        DocId::max_encoded_len()
+            + u128::max_encoded_len()
+            + u128::max_encoded_len()
+            + MultiDID::<Account>::max_encoded_len()
+            + IdentityInfo::max_encoded_len() * MAX_MULTI_OWNERS_NUM
+            + AccessRule::max_encoded_len()
+            + CopyrightInfo::max_encoded_len()
+            + ContentMetadata::max_encoded_len()
+            + Proof::max_encoded_len() * MAX_MULTI_OWNERS_NUM
+            + MultiAsset::max_encoded_len()
+            + URI::max_encoded_len()
     }
 }
 
@@ -448,11 +450,11 @@ where
     Account: PartialEq + Clone,
 {
     pub fn new(
-        id: DocId, 
-        multi_owner_did: MultiDID<Account>, 
+        id: DocId,
+        multi_owner_did: MultiDID<Account>,
         created_at: u128,
         asset: Option<MultiAsset>,
-        data_source: Option<URI>
+        data_source: Option<URI>,
     ) -> Self {
         Self {
             id,
@@ -465,7 +467,7 @@ where
             access_rules: None,
             proofs: None,
             asset,
-            data_source, 
+            data_source,
         }
     }
 
@@ -679,9 +681,8 @@ impl sp_runtime::traits::Printable for UpdateDocStatusError {
 }
 
 pub mod max_size {
-    
-    use super::*;
 
+    use super::*;
 
     /// Maximum number of `URAuthDoc` owners we expect in a single `MultiDID` value. Note this is not (yet)
     /// enforced, and just serves to provide a sensible `max_encoded_len` for `MultiDID`.

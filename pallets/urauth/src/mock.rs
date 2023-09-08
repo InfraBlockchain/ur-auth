@@ -119,7 +119,10 @@ impl<Account: Encode> MockURAuthHelper<Account> {
         }
     }
 
-    pub fn deconstruct_urauth_doc(&self, uri: Option<String>) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    pub fn deconstruct_urauth_doc(
+        &self,
+        uri: Option<String>,
+    ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
         self.mock_doc_manager.deconstruct(uri)
     }
 
@@ -153,7 +156,12 @@ impl<Account: Encode> MockURAuthHelper<Account> {
     }
 
     pub fn raw_owner_did(&self) -> OwnerDID {
-        self.mock_doc_manager.owner_did.as_bytes().to_vec().try_into().expect("Too long!")
+        self.mock_doc_manager
+            .owner_did
+            .as_bytes()
+            .to_vec()
+            .try_into()
+            .expect("Too long!")
     }
 
     pub fn challenge_value(&self) -> Randomness {
@@ -280,7 +288,7 @@ impl MockURAuthDocManager {
 
     fn bounded_uri(&self, of: Option<String>) -> URI {
         let opaque_uri = of.map_or(self.uri.as_bytes().to_vec(), |s| s.as_bytes().to_vec());
-        opaque_uri.try_into().expect("Too Long") 
+        opaque_uri.try_into().expect("Too Long")
     }
 
     fn deconstruct(&self, uri: Option<String>) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
@@ -376,9 +384,9 @@ impl ExtBuilder {
     }
 }
 
-pub fn debug_doc<Account>(urauth_doc: &URAuthDoc<Account>) 
+pub fn debug_doc<Account>(urauth_doc: &URAuthDoc<Account>)
 where
-    Account: Encode + sp_std::fmt::Debug
+    Account: Encode + sp_std::fmt::Debug,
 {
     println!("URAUTH DOCUMENT => {:?}", urauth_doc);
     println!("");

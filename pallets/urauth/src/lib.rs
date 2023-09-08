@@ -3,7 +3,11 @@
 use codec::Encode;
 use fixedstr::zstr;
 
-use frame_support::{pallet_prelude::*, traits::{UnixTime, ConstU32}, BoundedVec};
+use frame_support::{
+    pallet_prelude::*,
+    traits::{ConstU32, UnixTime},
+    BoundedVec,
+};
 
 use frame_system::pallet_prelude::*;
 use sp_consensus_vrf::schnorrkel::Randomness;
@@ -303,7 +307,8 @@ pub mod pallet {
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            let bounded_owner_did: OwnerDID = owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            let bounded_owner_did: OwnerDID =
+                owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
 
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
@@ -408,7 +413,8 @@ pub mod pallet {
             let _ = ensure_signed(origin)?;
             let (mut updated_urauth_doc, mut update_doc_status) =
                 Self::try_update_urauth_doc(&uri, &update_doc_field, updated_at, proof.clone())?;
-            let (owner, proof) = Self::try_verify_urauth_doc_proof(&uri, &updated_urauth_doc, proof)?;
+            let (owner, proof) =
+                Self::try_verify_urauth_doc_proof(&uri, &updated_urauth_doc, proof)?;
             Self::try_store_updated_urauth_doc(
                 owner,
                 proof,
@@ -422,8 +428,8 @@ pub mod pallet {
         }
 
         // Description:
-        // Claim ownership of `ClaimType::*`. 
-        // This doesn't require any challenge json verification. 
+        // Claim ownership of `ClaimType::*`.
+        // This doesn't require any challenge json verification.
         // Once signature is verified, URAuthDoc will be registered on URAuthTree.
         //
         // Origin:
@@ -437,7 +443,7 @@ pub mod pallet {
         // - proof: Proof of URI's ownership
         //
         // Logic:
-        // 1. Verify signature 
+        // 1. Verify signature
         // 2. Once it is verified, create new URAuthDoc based on `claim_type`
         #[pallet::call_index(3)]
         #[pallet::weight(1_000)]
@@ -449,42 +455,47 @@ pub mod pallet {
             signer: MultiSigner,
             proof: MultiSignature,
         ) -> DispatchResult {
-
             let _ = ensure_signed(origin)?;
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            let bounded_owner_did: OwnerDID = owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            let bounded_owner_did: OwnerDID =
+                owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
-            let owner = Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
+            let owner =
+                Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
             let (count, urauth_doc) = match claim_type {
-                ClaimType::File => { 
-                    Self::new_urauth_doc(owner, None, None)?
-                },
-                ClaimType::Dataset { data_source, name, description } => {
-                    let bounded_name: AnyText = name.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-                    let bounded_description: AnyText = description.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                ClaimType::File => Self::new_urauth_doc(owner, None, None)?,
+                ClaimType::Dataset {
+                    data_source,
+                    name,
+                    description,
+                } => {
+                    let bounded_name: AnyText =
+                        name.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                    let bounded_description: AnyText = description
+                        .try_into()
+                        .map_err(|_| Error::<T>::OverMaxSize)?;
                     let bounded_data_source: Option<URI> = match data_source {
                         Some(ds) => {
-                            let bounded: URI = ds.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                            let bounded: URI =
+                                ds.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
                             Some(bounded)
-                        },
-                        None => None
+                        }
+                        None => None,
                     };
                     DataSet::<T>::insert(
-                        &bounded_uri, 
-                        DataSetMetadata::<AnyText>::new(bounded_name, bounded_description)
+                        &bounded_uri,
+                        DataSetMetadata::<AnyText>::new(bounded_name, bounded_description),
                     );
                     Self::new_urauth_doc(owner, None, bounded_data_source)?
                 }
             };
 
             URAuthTree::<T>::insert(&bounded_uri, urauth_doc.clone());
-            Self::deposit_event(
-                Event::<T>::URAuthTreeRegistered {
-                    count,
-                    uri: bounded_uri,
-                    urauth_doc,
-                },
-            );
+            Self::deposit_event(Event::<T>::URAuthTreeRegistered {
+                count,
+                uri: bounded_uri,
+                urauth_doc,
+            });
 
             Ok(())
         }
@@ -555,20 +566,22 @@ impl<T: Config> Pallet<T> {
         Default::default()
     }
 
-    fn new_urauth_doc(owner_did: T::AccountId, asset: Option<MultiAsset>, data_source: Option<URI>) -> Result<(URAuthDocCount, URAuthDoc<T::AccountId>), DispatchError> {
+    fn new_urauth_doc(
+        owner_did: T::AccountId,
+        asset: Option<MultiAsset>,
+        data_source: Option<URI>,
+    ) -> Result<(URAuthDocCount, URAuthDoc<T::AccountId>), DispatchError> {
         let (count, doc_id) = Self::doc_id()?;
-        Ok(
-            (
-                count, 
-                URAuthDoc::new(
-                    doc_id,
-                    MultiDID::new(owner_did, 1),
-                    Self::unix_time(),
-                    asset,
-                    data_source,
-                )
-            )
-        )
+        Ok((
+            count,
+            URAuthDoc::new(
+                doc_id,
+                MultiDID::new(owner_did, 1),
+                Self::unix_time(),
+                asset,
+                data_source,
+            ),
+        ))
     }
 
     /// Verify `request` signature
@@ -881,7 +894,8 @@ impl<T: Config> Pallet<T> {
                         .map_err(|_| Error::<T>::ErrorDecodeHex)?;
                     let mut raw_payload: Vec<u8> = Default::default();
                     let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-                    let bounded_owner_did: OwnerDID = owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?; 
+                    let bounded_owner_did: OwnerDID =
+                        owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
                     URAuthSignedPayload::<T::AccountId>::Challenge {
                         uri: bounded_uri.clone(),
                         owner_did: bounded_owner_did.clone(),
