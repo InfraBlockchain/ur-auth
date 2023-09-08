@@ -48,8 +48,6 @@ pub mod pallet {
         type AuthorizedOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
 
-    #[pallet::storage]
-    #[pallet::unbounded]
     /// **Description:**
     ///
     /// Store the `URAuthDoc` corresponding to the verified URI by Oracle nodes.
@@ -62,9 +60,9 @@ pub mod pallet {
     /// **Value:**
     ///
     /// URAuthDoc
+    #[pallet::storage]
     pub type URAuthTree<T: Config> = StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId>>;
 
-    #[pallet::storage]
     /// **Description:**
     ///
     /// Temporarily store the URIMetadata(owner_did and challenge_value) for the unverified URI in preparation for its verification.
@@ -76,11 +74,12 @@ pub mod pallet {
     /// **Value:**
     ///
     /// URIMetadata
-    pub type URIMetadata<T: Config> = StorageMap<_, Twox128, URI, Metadata, OptionQuery>;
+    #[pallet::storage]
+    pub type URIMetadata<T: Config> = StorageMap<_, Twox128, URI, Metadata>;
 
     #[pallet::storage]
-    #[pallet::unbounded]
-    #[pallet::getter(fn uri_verification_info)]
+    pub type DataSet<T: Config> = StorageMap<_, Twox128, URI, DataSetMetadata<AnyText>>;
+
     /// **Description:**
     ///
     /// When validation is initiated by the Oracle node, store the submission status.
@@ -93,11 +92,12 @@ pub mod pallet {
     /// **Value:**
     ///
     /// VerificationSubmission
+    #[pallet::storage]
+    #[pallet::unbounded]
+    #[pallet::getter(fn uri_verification_info)]
     pub type URIVerificationInfo<T: Config> =
         StorageMap<_, Twox128, URI, VerificationSubmission<T>>;
 
-    #[pallet::storage]
-    #[pallet::unbounded]
     /// **Description:**
     ///
     /// A random Challenge value is stored for the requested URI.
@@ -110,10 +110,8 @@ pub mod pallet {
     /// **Value:**
     ///
     /// schnorrkel::Randomness
-    pub type ChallengeValue<T: Config> = StorageMap<_, Twox128, URI, Randomness>;
-
     #[pallet::storage]
-    #[pallet::unbounded]
+    pub type ChallengeValue<T: Config> = StorageMap<_, Twox128, URI, Randomness>;
     /// **Description:**
     ///
     /// The status of the URAuthDoc that has been requested for update on a specific field is stored in the form of UpdateDocStatus.
@@ -126,6 +124,8 @@ pub mod pallet {
     /// **Value:**
     ///
     /// UpdateDocStatus
+    #[pallet::storage]
+    #[pallet::unbounded]
     pub type URAuthDocUpdateStatus<T: Config> =
         StorageMap<_, Blake2_128Concat, DocId, UpdateDocStatus<T::AccountId>, ValueQuery>;
 
@@ -142,7 +142,6 @@ pub mod pallet {
         StorageValue<_, BoundedVec<T::AccountId, T::MaxOracleMembers>, ValueQuery>;
 
     #[pallet::storage]
-    #[pallet::unbounded]
     /// **Description:**
     ///
     /// Contains various _config_ information for the URAuth pallet.
@@ -422,22 +421,62 @@ pub mod pallet {
             Ok(())
         }
 
+        // Description:
+        // Claim ownership of `ClaimType::*`. 
+        // This doesn't require any challenge json verification. 
+        // Once signature is verified, URAuthDoc will be registered on URAuthTree.
+        //
+        // Origin:
+        // ** Signed call **
+        //
+        // Params:
+        // - claim_type: Type of claim to register on URAuthTree
+        // - uri: URI to be claimed its ownership
+        // - owner_did: URI owner's DID
+        // - signer: Entity who creates signature
+        // - proof: Proof of URI's ownership
+        //
+        // Logic:
+        // 1. Verify signature 
+        // 2. Once it is verified, create new URAuthDoc based on `claim_type`
         #[pallet::call_index(3)]
         #[pallet::weight(1_000)]
-        pub fn claim_file_ownership(
+        pub fn claim_ownership(
             origin: OriginFor<T>,
-            cid: Vec<u8>,
+            claim_type: ClaimType,
+            uri: Vec<u8>,
             owner_did: Vec<u8>,
             signer: MultiSigner,
-            proof: MultiSignature
+            proof: MultiSignature,
         ) -> DispatchResult {
 
             let _ = ensure_signed(origin)?;
-            let bounded_uri: URI = cid.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID = owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?; 
+            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
             let owner = Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
-            let (count, urauth_doc) = Self::new_urauth_doc(owner)?;
+            let (count, urauth_doc) = match claim_type {
+                ClaimType::File => { 
+                    Self::new_urauth_doc(owner, None, None)?
+                },
+                ClaimType::Dataset { data_source, name, description } => {
+                    let bounded_name: AnyText = name.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                    let bounded_description: AnyText = description.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                    let bounded_data_source: Option<URI> = match data_source {
+                        Some(ds) => {
+                            let bounded: URI = ds.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                            Some(bounded)
+                        },
+                        None => None
+                    };
+                    DataSet::<T>::insert(
+                        &bounded_uri, 
+                        DataSetMetadata::<AnyText>::new(bounded_name, bounded_description)
+                    );
+                    Self::new_urauth_doc(owner, None, bounded_data_source)?
+                }
+            };
+
             URAuthTree::<T>::insert(&bounded_uri, urauth_doc.clone());
             Self::deposit_event(
                 Event::<T>::URAuthTreeRegistered {
@@ -516,7 +555,7 @@ impl<T: Config> Pallet<T> {
         Default::default()
     }
 
-    fn new_urauth_doc(owner_did: T::AccountId) -> Result<(URAuthDocCount, URAuthDoc<T::AccountId>), DispatchError> {
+    fn new_urauth_doc(owner_did: T::AccountId, asset: Option<MultiAsset>, data_source: Option<URI>) -> Result<(URAuthDocCount, URAuthDoc<T::AccountId>), DispatchError> {
         let (count, doc_id) = Self::doc_id()?;
         Ok(
             (
@@ -525,6 +564,8 @@ impl<T: Config> Pallet<T> {
                     doc_id,
                     MultiDID::new(owner_did, 1),
                     Self::unix_time(),
+                    asset,
+                    data_source,
                 )
             )
         )
@@ -571,7 +612,7 @@ impl<T: Config> Pallet<T> {
     ) -> Result<(), DispatchError> {
         match res {
             VerificationSubmissionResult::Complete => {
-                let (count, urauth_doc) = Self::new_urauth_doc(owner_did)?;
+                let (count, urauth_doc) = Self::new_urauth_doc(owner_did, None, None)?;
                 Counter::<T>::put(count);
                 URAuthTree::<T>::insert(&uri, urauth_doc.clone());
                 Self::remove_all_uri_related(uri.clone());

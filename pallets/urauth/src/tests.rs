@@ -1,6 +1,6 @@
 pub use crate::{self as pallet_urauth, mock::*, Event as URAuthEvent, *};
 
-use frame_support::{assert_noop, assert_ok};
+use frame_support::{assert_noop, assert_ok, debug};
 use sp_keyring::AccountKeyring::*;
 use sp_runtime::{traits::BlakeTwo256, AccountId32, MultiSigner};
 
@@ -158,7 +158,6 @@ fn urauth_request_register_ownership_works() {
             signer.clone(),
             signature.clone()
         ));
-
         let metadata = URIMetadata::<Test>::get(&bounded_uri).unwrap();
         assert!(
             String::from_utf8_lossy(&metadata.owner_did) == urauth_helper.owner_did()
@@ -265,7 +264,7 @@ fn verify_challenge_works() {
             .into(),
         );
         let urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
-        println!("{:?}", urauth_doc);
+        debug_doc(&urauth_doc);
     });
 }
 
@@ -309,15 +308,12 @@ fn update_urauth_doc_works() {
         ));
 
         let mut urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
-        println!("");
-        println!("BEFORE UPDATE");
-        println!("");
-        println!("{:?}", urauth_doc);
+        debug_doc(&urauth_doc);
 
         let update_doc_field = UpdateDocField::AccessRules(Some(vec![AccessRule::AccessRuleV1 {
             path: "/raf".as_bytes().to_vec().try_into().expect("Too long!"),
             rules: vec![Rule {
-                user_agents: vec![UserAgent("GPTBOT".as_bytes().to_vec().try_into().expect("Too long"))],
+                user_agents: vec!["GPTBOT".as_bytes().to_vec().try_into().expect("Too long")],
                 allow: vec![(
                     ContentType::Image,
                     Price {
@@ -345,10 +341,7 @@ fn update_urauth_doc_works() {
             })
         ));
         let mut urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
-        println!("");
-        println!("AFTER UPDATE ACCESS RULE");
-        println!("");
-        println!("{:?}", urauth_doc);
+        debug_doc(&urauth_doc);
 
         let update_doc_field = UpdateDocField::MultiDID(WeightedDID {
             did: Bob.to_account_id(),
@@ -371,10 +364,7 @@ fn update_urauth_doc_works() {
         ));
 
         let mut urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
-        println!("");
-        println!("AFTER UPDATE DID OWNERS: ADD BOB");
-        println!("");
-        println!("{:?}", urauth_doc);
+        debug_doc(&urauth_doc);
 
         let update_doc_field = UpdateDocField::<MockAccountId>::Threshold(2);
         urauth_doc.update_doc(update_doc_field.clone(), 3).unwrap();
@@ -394,10 +384,7 @@ fn update_urauth_doc_works() {
         ));
 
         let mut urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
-        println!("");
-        println!("AFTER UPDATE THRESOLD: FROM 1 TO 2");
-        println!("");
-        println!("{:?}", urauth_doc);
+        debug_doc(&urauth_doc);
 
         let update_doc_field = UpdateDocField::MultiDID(WeightedDID {
             did: Charlie.to_account_id(),
@@ -447,7 +434,7 @@ fn update_urauth_doc_works() {
         // Since threhold is 2, URAUTH Document has not been updated.
         // Bob should sign for update.
         let mut urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
-        println!("Document => {:?}", urauth_doc);
+        
         let update_doc_field = UpdateDocField::MultiDID(WeightedDID {
             did: Charlie.to_account_id(),
             weight: 1,
@@ -470,7 +457,7 @@ fn update_urauth_doc_works() {
         ));
 
         let urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
-        println!("{:?}", urauth_doc);
+        debug_doc(&urauth_doc);
         let proofs = urauth_doc.clone().proofs.unwrap();
         for proof in proofs {
             match proof {
@@ -480,10 +467,7 @@ fn update_urauth_doc_works() {
             }
         }
         assert!(urauth_doc.clone().proofs.unwrap().len() == 2);
-        println!("");
-        println!("AFTER UPDATE DID OWNERS: ADD CHARILE");
-        println!("");
-        println!("{:?}", urauth_doc);
+        debug_doc(&urauth_doc);
     });
 }
 
@@ -565,4 +549,62 @@ fn verify_challenge_with_multiple_oracle_members() {
             .into(),
         );
     })
+}
+
+#[test]
+fn claim_file_ownership_works() {
+    new_test_ext().execute_with(|| {
+        let mut urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
+        let (_, owner_did, _, _) = urauth_helper.deconstruct_urauth_doc(None);
+        let bounded_uri = urauth_helper.bounded_uri(Some("urauth://file".into()));
+        let bounded_owner_did = urauth_helper.raw_owner_did();
+        let request_sig =
+            urauth_helper.create_signature(Alice, ProofType::Request(bounded_uri.clone(), bounded_owner_did.clone()));
+        assert_ok!(
+            URAuth::claim_ownership(
+                RuntimeOrigin::signed(Alice.to_account_id()), 
+                ClaimType::File,
+                "urauth://file".into(), 
+                owner_did, 
+                MultiSigner::Sr25519(Alice.public()), 
+                request_sig
+            )
+        );
+        let urauth_doc = URAuthTree::<Test>::get(&bounded_uri);
+        println!("{:?}", urauth_doc);
+        println!("Size of URAUTH DOCUMENT => {:?} bytes", urauth_doc.encode().len());
+    })
+}
+
+#[test]
+fn register_dataset_works() {
+    new_test_ext().execute_with(|| {
+        let mut urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
+        let (_, owner_did, _, _) = urauth_helper.deconstruct_urauth_doc(None);
+        let bounded_uri = urauth_helper.bounded_uri(Some("urauth://file".into()));
+        let bounded_owner_did = urauth_helper.raw_owner_did();
+        let request_sig =
+            urauth_helper.create_signature(Alice, ProofType::Request(bounded_uri.clone(), bounded_owner_did.clone()));
+
+        assert_ok!(
+            URAuth::claim_ownership(
+                RuntimeOrigin::signed(Alice.to_account_id()), 
+                ClaimType::Dataset { data_source: Some("ipfs://{SHA256}".into()), name: "".into(), description: "".into() },
+                "urauth://file".into(), 
+                owner_did, 
+                MultiSigner::Sr25519(Alice.public()), 
+                request_sig,
+            )
+        );
+        
+        let urauth_doc = URAuthTree::<Test>::get(&bounded_uri);
+        println!("{:?}", urauth_doc);
+        println!("Size of URAUTH DOCUMENT is {:?} b", urauth_doc.encode().len() as f32);
+    })
+}
+
+
+#[test]
+fn max_encoded_len() {
+    println!("URAUTH DOCUMENT SIZE is {:?} KB", URAuthDoc::<AccountId32>::max_encoded_len() as f32 / 1_000f32);
 }

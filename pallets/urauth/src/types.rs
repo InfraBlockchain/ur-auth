@@ -2,18 +2,47 @@ use super::*;
 
 use codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
-#[cfg(feature = "std")]
-use serde::{Deserialize, Serialize};
 use sp_runtime::RuntimeDebug;
 use sp_std::collections::btree_map::BTreeMap;
 pub use max_size::*;
 
-pub type DIDWeight = u16;
+#[cfg(feature = "std")]
+use serde::{Deserialize, Serialize};
+
+pub type Rules = Vec<Rule>;
 pub type DocId = [u8; 16];
+pub type DIDWeight = u16;
 pub type ApprovalCount = u32;
 pub type Threshold = u32;
 pub type URAuthDocCount = u128;
-pub type RemainingThreshold = u16;
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub enum ClaimType {
+    File,
+    Dataset { data_source: Option<Vec<u8>>, name: Vec<u8>, description: Vec<u8> }
+}
+
+impl MaxEncodedLen for ClaimType {
+    fn max_encoded_len() -> usize {
+        URI::max_encoded_len() 
+            + URI::max_encoded_len()
+    }
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Debug, Eq, TypeInfo, MaxEncodedLen)]
+pub struct DataSetMetadata<BoundedString> {
+    name: BoundedString,
+    description: BoundedString,
+}
+
+impl<BoundedString> DataSetMetadata<BoundedString> {
+    pub fn new(name: BoundedString, description: BoundedString) -> Self {
+        Self {
+            name,
+            description
+        }
+    }
+}
 
 /// Metadata for verifying challenge value
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -122,7 +151,7 @@ pub enum VerificationSubmissionResult {
 }
 
 /// Configuration of challenge value.
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct ChallengeValueConfig {
     pub randomness_enabled: bool,
@@ -186,6 +215,8 @@ impl<Account: Encode> Encode for URAuthSignedPayload<Account> {
                     content_metadata,
                     copyright_info,
                     access_rules,
+                    asset,
+                    data_source,
                     ..
                 } = urauth_doc;
 
@@ -199,6 +230,8 @@ impl<Account: Encode> Encode for URAuthSignedPayload<Account> {
                     content_metadata,
                     copyright_info,
                     access_rules,
+                    asset,
+                    data_source,
                     owner_did,
                 )
                     .encode()
@@ -237,6 +270,15 @@ pub struct MultiDID<Account> {
     pub dids: Vec<WeightedDID<Account>>,
     // Sum(weight) >= threshold
     pub threshold: DIDWeight,
+}
+
+impl<Account> MaxEncodedLen for MultiDID<Account> 
+where
+    Account: Encode + MaxEncodedLen
+{
+    fn max_encoded_len() -> usize {
+        WeightedDID::<Account>::max_encoded_len() * MAX_OWNER_DID_SIZE as usize
+    }
 }
 
 impl<Account: PartialEq> MultiDID<Account> {
@@ -287,6 +329,11 @@ impl<Account: PartialEq> MultiDID<Account> {
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub enum IdentityInfo {
+    IdentityInfoV1 { vc: VerfiableCredential }
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum StorageProvider {
     IPFS,
 }
@@ -310,11 +357,15 @@ pub enum CopyrightInfo {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum AccessRule {
-    AccessRuleV1 { path: AnyText, rules: Vec<Rule> },
+    AccessRuleV1 { path: AnyText, rules: Rules },
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-pub struct UserAgent(pub AnyText);
+impl MaxEncodedLen for AccessRule {
+    fn max_encoded_len() -> usize {
+        AnyText::max_encoded_len() 
+        + Rule::max_encoded_len() * MAX_RULES_NUM
+    }
+}
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct Rule {
@@ -323,21 +374,30 @@ pub struct Rule {
     pub disallow: Vec<ContentType>,
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+impl MaxEncodedLen for Rule {
+    fn max_encoded_len() -> usize {
+        UserAgent::max_encoded_len() * MAX_USER_AGENTS_NUM
+        + (ContentType::max_encoded_len() + Price::max_encoded_len()) * 4
+    }
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum PriceUnit {
     USDPerMb,
     KRWPerMb,
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub struct Price {
     pub price: u64,
     pub decimals: u8,
     pub unit: PriceUnit,
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Default, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum ContentType {
+    #[default]
+    All,
     Image,
     Video,
     Text,
@@ -355,20 +415,45 @@ pub struct URAuthDoc<Account> {
     pub created_at: u128,
     pub updated_at: u128,
     pub multi_owner_did: MultiDID<Account>,
-    pub identity_info: Option<Vec<AnyText>>,
+    pub identity_info: Option<Vec<IdentityInfo>>,
     pub content_metadata: Option<ContentMetadata>,
     pub copyright_info: Option<CopyrightInfo>,
     pub access_rules: Option<Vec<AccessRule>>,
-    pub proofs: Option<Vec<Proof>>,
     pub asset: Option<MultiAsset>,
     pub data_source: Option<URI>,
+    pub proofs: Option<Vec<Proof>>,
+}
+
+impl<Account> MaxEncodedLen for URAuthDoc<Account> 
+where
+    Account: Encode + MaxEncodedLen
+{
+    fn max_encoded_len() -> usize {
+        DocId::max_encoded_len() 
+        + u128::max_encoded_len() 
+        + u128::max_encoded_len()
+        + MultiDID::<Account>::max_encoded_len()
+        + IdentityInfo::max_encoded_len() * MAX_MULTI_OWNERS_NUM
+        + AccessRule::max_encoded_len() 
+        + CopyrightInfo::max_encoded_len() 
+        + ContentMetadata::max_encoded_len() 
+        + Proof::max_encoded_len() * MAX_MULTI_OWNERS_NUM
+        + MultiAsset::max_encoded_len() 
+        + URI::max_encoded_len() 
+    }
 }
 
 impl<Account> URAuthDoc<Account>
 where
     Account: PartialEq + Clone,
 {
-    pub fn new(id: DocId, multi_owner_did: MultiDID<Account>, created_at: u128) -> Self {
+    pub fn new(
+        id: DocId, 
+        multi_owner_did: MultiDID<Account>, 
+        created_at: u128,
+        asset: Option<MultiAsset>,
+        data_source: Option<URI>
+    ) -> Self {
         Self {
             id,
             multi_owner_did,
@@ -379,8 +464,8 @@ where
             copyright_info: None,
             access_rules: None,
             proofs: None,
-            asset: None,
-            data_source: None, 
+            asset,
+            data_source, 
         }
     }
 
@@ -449,7 +534,7 @@ where
 pub enum UpdateDocField<Account> {
     MultiDID(WeightedDID<Account>),
     Threshold(DIDWeight),
-    IdentityInfo(Option<Vec<AnyText>>),
+    IdentityInfo(Option<Vec<IdentityInfo>>),
     ContentMetadata(Option<ContentMetadata>),
     CopyrightInfo(Option<CopyrightInfo>),
     AccessRules(Option<Vec<AccessRule>>),
@@ -466,7 +551,7 @@ pub enum UpdateStatus<Account> {
 }
 
 /// Status for updating `URAuthDoc`
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct UpdateDocStatus<Account> {
     /// Threshold for updating
     pub remaining_threshold: DIDWeight,
@@ -597,6 +682,23 @@ pub mod max_size {
     
     use super::*;
 
+
+    /// Maximum number of `URAuthDoc` owners we expect in a single `MultiDID` value. Note this is not (yet)
+    /// enforced, and just serves to provide a sensible `max_encoded_len` for `MultiDID`.
+    pub const MAX_MULTI_OWNERS_NUM: usize = 5;
+
+    /// Maximum number of `access_rules` we expect in a single `MultiDID` value. Note this is not (yet)
+    /// enforced, and just serves to provide a sensible `max_encoded_len` for `MultiDID`.
+    pub const MAX_ACCESS_RULES: u32 = 10;
+
+    /// Maximum number of `user agents` we expect in a single `MultiDID` value. Note this is not (yet)
+    /// enforced, and just serves to provide a sensible `max_encoded_len` for `MultiDID`.
+    pub const MAX_USER_AGENTS_NUM: usize = 5;
+
+    /// Maximum number of `rule` we expect in a single `MultiDID` value. Note this is not (yet)
+    /// enforced, and just serves to provide a sensible `max_encoded_len` for `MultiDID`.
+    pub const MAX_RULES_NUM: usize = 20;
+
     /// URI is up to 3 KB
     pub const MAX_URI_SIZE: u32 = 3 * 1024;
 
@@ -611,4 +713,11 @@ pub mod max_size {
     pub const MAX_COMMON_SIZE: u32 = 100;
 
     pub type AnyText = BoundedVec<u8, ConstU32<MAX_COMMON_SIZE>>;
+
+    pub type UserAgent = AnyText;
+
+    /// Encoded size of VC is up to 1 KB.
+    pub const MAX_IDENTITY_INFO: u32 = 1024;
+
+    pub type VerfiableCredential = BoundedVec<u8, ConstU32<MAX_IDENTITY_INFO>>;
 }

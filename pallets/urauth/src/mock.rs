@@ -200,6 +200,8 @@ impl<Account: Encode> MockProver<Account> {
                     content_metadata,
                     copyright_info,
                     access_rules,
+                    asset,
+                    data_source,
                     ..
                 } = urauth_doc;
 
@@ -213,6 +215,8 @@ impl<Account: Encode> MockProver<Account> {
                     content_metadata,
                     copyright_info,
                     access_rules,
+                    asset,
+                    data_source,
                     owner_did,
                 )
                     .encode()
@@ -370,4 +374,13 @@ impl ExtBuilder {
         let mut ext = self.build();
         ext.execute_with(test);
     }
+}
+
+pub fn debug_doc<Account>(urauth_doc: &URAuthDoc<Account>) 
+where
+    Account: Encode + sp_std::fmt::Debug
+{
+    println!("URAUTH DOCUMENT => {:?}", urauth_doc);
+    println!("");
+    println!("DOCUMENT SIZE => {:?} bytes", urauth_doc.encode().len());
 }

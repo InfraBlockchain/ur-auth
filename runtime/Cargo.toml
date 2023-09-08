@@ -26,7 +26,6 @@ smallvec = "1.10.0"
 # Local
 pallet-urauth = { version = "0.1.0", default-features = false, path = "../pallets/urauth" }
 pallet-urauth-runtime-api = { version = "0.1.0", default-features = false, path = "../pallets/urauth/runtime-api" }
-pallet-data-market = { version = "0.1.0", default-features = false, path = "../pallets/data-market" }
 
 # Substrate
 pallet-system-token-payment = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
@@ -145,7 +144,6 @@ std = [
 	"parachains-common/std",
 	"pallet-urauth/std",
 	"pallet-urauth-runtime-api/std",
-	"pallet-data-market/std",
 ]
 
 runtime-benchmarks = [
