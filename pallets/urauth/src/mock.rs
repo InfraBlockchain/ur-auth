@@ -77,6 +77,7 @@ impl pallet_urauth::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type UnixTime = Timestamp;
     type MaxOracleMembers = MaxOracleMembers;
+    type MaxURIByOracle = ConstU32<100>;
     type AuthorizedOrigin = EnsureRoot<MockAccountId>;
 }
 

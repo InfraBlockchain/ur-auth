@@ -18,6 +18,8 @@ pub type URAuthDocCount = u128;
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum ClaimType {
+    WebsiteDomain,
+    WebServiceAccount,
     File,
     Dataset {
         data_source: Option<Vec<u8>>,

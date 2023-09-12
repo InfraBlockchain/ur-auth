@@ -49,6 +49,9 @@ pub mod pallet {
 
         type MaxOracleMembers: Get<u32>;
 
+        #[pallet::constant]
+        type MaxURIByOracle: Get<u32>;
+
         type AuthorizedOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
 
@@ -132,8 +135,6 @@ pub mod pallet {
     pub type URAuthDocUpdateStatus<T: Config> =
         StorageMap<_, Blake2_128Concat, DocId, UpdateDocStatus<T::AccountId>, ValueQuery>;
 
-    #[pallet::storage]
-    #[pallet::getter(fn oracle_members)]
     /// **Description:**
     ///
     /// Contains the AccountId information of the Oracle node.
@@ -141,10 +142,15 @@ pub mod pallet {
     /// **Value:**
     ///
     /// BoundedVec<T::AccoutnId, T::MaxOracleMembers>
+    #[pallet::storage]
+    #[pallet::getter(fn oracle_members)]
     pub type OracleMembers<T: Config> =
         StorageValue<_, BoundedVec<T::AccountId, T::MaxOracleMembers>, ValueQuery>;
 
     #[pallet::storage]
+    pub type URIByOracle<T: Config> = 
+        StorageValue<_, BoundedVec<URI, T::MaxURIByOracle>, ValueQuery>;
+
     /// **Description:**
     ///
     /// Contains various _config_ information for the URAuth pallet.
@@ -152,6 +158,7 @@ pub mod pallet {
     /// **Value:**
     ///
     /// ChallengeValueConfig
+    #[pallet::storage]
     pub type URAuthConfig<T: Config> = StorageValue<_, ChallengeValueConfig, ValueQuery>;
 
     /// **Description:**
@@ -168,6 +175,7 @@ pub mod pallet {
     pub struct GenesisConfig<T: Config> {
         pub oracle_members: Vec<T::AccountId>,
         pub challenge_value_config: ChallengeValueConfig,
+        pub uris_by_oracle: Vec<Vec<u8>>
     }
 
     #[cfg(feature = "std")]
@@ -176,6 +184,7 @@ pub mod pallet {
             GenesisConfig {
                 oracle_members: Default::default(),
                 challenge_value_config: Default::default(),
+                uris_by_oracle: Default::default(),
             }
         }
     }
@@ -190,6 +199,17 @@ pub mod pallet {
                 .expect("Max Oracle members reached!");
             OracleMembers::<T>::put(oracle_members);
             URAuthConfig::<T>::put(self.challenge_value_config.clone());
+            let uris_by_oracle: BoundedVec<URI, T::MaxURIByOracle> = self
+                .uris_by_oracle
+                .iter()
+                .map(|uri| { 
+                    let bounded_uri = uri.to_owned().try_into().expect("Too Long!");
+                    bounded_uri
+                })
+                .collect::<Vec<URI>>()
+                .try_into()
+                .expect("Too long");
+            URIByOracle::<T>::put(uris_by_oracle);
         }
     }
 
@@ -462,7 +482,6 @@ pub mod pallet {
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
             let (count, urauth_doc) = match claim_type {
-                ClaimType::File => Self::new_urauth_doc(owner, None, None)?,
                 ClaimType::Dataset {
                     data_source,
                     name,
@@ -486,7 +505,8 @@ pub mod pallet {
                         DataSetMetadata::<AnyText>::new(bounded_name, bounded_description),
                     );
                     Self::new_urauth_doc(owner, None, bounded_data_source)?
-                }
+                },
+                _ => Self::new_urauth_doc(owner, None, None)?
             };
 
             URAuthTree::<T>::insert(&bounded_uri, urauth_doc.clone());

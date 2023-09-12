@@ -663,3 +663,17 @@ fn max_encoded_len() {
         URAuthDoc::<AccountId32>::max_encoded_len() as f32 / 1_000_000f32
     );
 }
+
+#[test]
+fn parse_string_works() {
+    use ada_url::Url;
+    use addr::parse_domain_name;
+
+    let u = Url::parse("http://sub2.sub1.instagram.com/coco/post", None)
+        .expect("bad url");
+    println!("{:?}", u.protocol());
+    println!("{:?}", u.hostname());
+    println!("{:?}", u.pathname());
+    let domain_name = parse_domain_name(u.hostname()).expect("Bad URL");
+    println!("{:?}", domain_name.root());
+}

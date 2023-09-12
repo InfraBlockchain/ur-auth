@@ -23,6 +23,8 @@ fixedstr = {version = "0.4", default-features = false }
 hex = { version = "0.4.3", default-features = false }
 log = { version = "0.4.17", default-features = false }
 serde = { version = "1.0.136", optional = true, features = ["derive"] }
+addr = { version = "0.15.6", default-features = false }
+ada-url = { version = "2.1.0", default-feautures = false, features = ["libcpp"] }
 
 # Substrate
 frame-benchmarking = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, optional = true, branch = "master" }
@@ -53,6 +55,8 @@ std = [
     "fixedstr/std",
     "hex/std",
     "serde",
+    "addr/std",
+    "ada-url/std",
 	"frame-benchmarking/std",
 	"frame-support/std",
 	"frame-system/std",
