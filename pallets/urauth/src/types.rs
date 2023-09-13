@@ -53,13 +53,19 @@ impl<BoundedString> DataSetMetadata<BoundedString> {
 pub struct Metadata {
     pub owner_did: OwnerDID,
     pub challenge_value: Randomness,
+    pub claim_type: ClaimType
 }
 
 impl Metadata {
-    pub fn new(owner_did: OwnerDID, challenge_value: Randomness) -> Self {
+    pub fn new(
+        owner_did: OwnerDID, 
+        challenge_value: Randomness,
+        claim_type: ClaimType,
+    ) -> Self {
         Self {
             owner_did,
             challenge_value,
+            claim_type
         }
     }
 }
@@ -709,7 +715,7 @@ pub trait Parser<T: Config> {
 
     fn root_uri(raw_url: &Vec<u8>) -> Result<URI, DispatchError>;
 
-    fn parent_uris(raw_url: &Vec<u8>) -> Result<Vec<URI>, DispatchError>;
+    fn parent_uris(raw_url: &Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError>;
 
     fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
         Ok(Default::default())
@@ -782,14 +788,15 @@ impl<T: Config> Parser<T> for URAuthParser {
         }
     }
     
-    fn parent_uris(raw_url: &Vec<u8>) -> Result<Vec<URI>, DispatchError> {
+    fn parent_uris(raw_url: &Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError> {
         let input = sp_std::str::from_utf8(raw_url)
             .map_err(|_| Error::<T>::ErrorOnParse)?;
+        let root = <Self as Parser<T>>::root_uri(raw_url)?;
+        if input.as_bytes().to_vec() == root.to_vec() {
+            return Ok(None)
+        }
         match ada_url::Url::parse(input, None) {
-            Ok(url) => { 
-
-                Ok(Default::default()
-            )},
+            Ok(url) => {Ok(Default::default())},
             Err(_) => { Ok(Default::default())}
         }
     }

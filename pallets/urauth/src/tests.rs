@@ -155,6 +155,7 @@ fn urauth_request_register_ownership_works() {
             "www.website1.com".as_bytes().to_vec(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
+            ClaimType::WebsiteDomain,
             signer.clone(),
             signature.clone()
         ));
@@ -177,6 +178,7 @@ fn urauth_request_register_ownership_works() {
                 uri.clone(),
                 urauth_helper.generate_did(BOB_SS58).as_bytes().to_vec(),
                 Some(urauth_helper.challenge_value()),
+                ClaimType::WebsiteDomain,
                 signer.clone(),
                 signature.clone()
             ),
@@ -198,6 +200,7 @@ fn urauth_request_register_ownership_works() {
                 uri.clone(),
                 owner_did.clone(),
                 Some(urauth_helper.challenge_value()),
+                ClaimType::WebsiteDomain,
                 signer.clone(),
                 signature2
             ),
@@ -222,6 +225,7 @@ fn urauth_request_register_ownership_works() {
                 uri.clone(),
                 owner_did,
                 Some(urauth_helper.challenge_value()),
+                ClaimType::WebsiteDomain,
                 signer.clone(),
                 signature3
             ),
@@ -262,6 +266,7 @@ fn verify_challenge_works() {
             uri.clone(),
             owner_did,
             Some(urauth_helper.challenge_value()),
+            ClaimType::WebsiteDomain,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -315,6 +320,7 @@ fn update_urauth_doc_works() {
             uri.clone(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
+            ClaimType::WebsiteDomain,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -572,6 +578,7 @@ fn verify_challenge_with_multiple_oracle_members() {
             uri.clone(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
+            ClaimType::WebsiteDomain,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -708,6 +715,7 @@ fn parse_string_works() {
 
 #[test]
 fn parser_works() {
+    parse_and_check_root("http://instagram.com", "instagram.com");
     parse_and_check_root("https://instagram.com", "instagram.com");
     parse_and_check_root("https://www.instagram.com", "instagram.com");
     parse_and_check_root("https://sub2.sub1.www.instagram.com", "instagram.com");

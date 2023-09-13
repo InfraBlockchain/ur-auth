@@ -222,7 +222,7 @@ pub mod pallet {
         URAuthRegisterRequested { uri: URI },
         /// `URAuthDoc` is registered on `URAuthTree`.
         URAuthTreeRegistered {
-            count: URAuthDocCount,
+            claim_type: ClaimType,
             uri: URI,
             urauth_doc: URAuthDoc<T::AccountId>,
         },
@@ -325,6 +325,7 @@ pub mod pallet {
             uri: Vec<u8>,
             owner_did: Vec<u8>,
             challenge_value: Option<Randomness>,
+            claim_type: ClaimType,
             signer: MultiSigner,
             proof: MultiSignature,
         ) -> DispatchResult {
@@ -341,7 +342,7 @@ pub mod pallet {
             };
 
             ChallengeValue::<T>::insert(&bounded_uri, cv);
-            URIMetadata::<T>::insert(&bounded_uri, Metadata::new(bounded_owner_did, cv));
+            URIMetadata::<T>::insert(&bounded_uri, Metadata::new(bounded_owner_did, cv, claim_type));
 
             Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri: bounded_uri });
 
@@ -380,7 +381,7 @@ pub mod pallet {
 
             // 1. OwnerDID of URI == Challenge Value's DID
             // 2. Verify signature
-            let owner = Self::try_verify_challenge_value(
+            let (owner, claim_type) = Self::try_verify_challenge_value(
                 sig,
                 proof_type,
                 raw_payload,
@@ -395,7 +396,7 @@ pub mod pallet {
                 VerificationSubmission::<T>::default()
             };
             let res = vs.submit(member_count, (who, BlakeTwo256::hash(&challenge_value)))?;
-            Self::handle_verification_submission_result(&res, vs, &uri, owner)?;
+            Self::handle_verification_submission_result(&res, vs, &uri, owner, claim_type)?;
             Self::deposit_event(Event::<T>::VerificationInfo {
                 uri,
                 progress_status: res,
@@ -485,7 +486,7 @@ pub mod pallet {
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
-            let (count, urauth_doc) = match claim_type {
+            let urauth_doc = match claim_type.clone() {
                 ClaimType::Dataset {
                     data_source,
                     name,
@@ -515,7 +516,7 @@ pub mod pallet {
 
             URAuthTree::<T>::insert(&bounded_uri, urauth_doc.clone());
             Self::deposit_event(Event::<T>::URAuthTreeRegistered {
-                count,
+                claim_type,
                 uri: bounded_uri,
                 urauth_doc,
             });
@@ -570,7 +571,7 @@ pub mod pallet {
 
 impl<T: Config> Pallet<T> {
     /// 16 bytes uuid based on `URAuthDocCount`
-    fn doc_id() -> Result<(u128, DocId), DispatchError> {
+    fn doc_id() -> Result<DocId, DispatchError> {
         let count = Counter::<T>::get();
         Counter::<T>::try_mutate(|c| -> DispatchResult {
             *c = c.checked_add(1).ok_or(Error::<T>::Overflow)?;
@@ -578,7 +579,7 @@ impl<T: Config> Pallet<T> {
         })?;
         let b = count.to_le_bytes();
 
-        Ok((count, nuuid::Uuid::from_bytes(b).to_bytes()))
+        Ok(nuuid::Uuid::from_bytes(b).to_bytes())
     }
 
     fn unix_time() -> u128 {
@@ -593,17 +594,14 @@ impl<T: Config> Pallet<T> {
         owner_did: T::AccountId,
         asset: Option<MultiAsset>,
         data_source: Option<URI>,
-    ) -> Result<(URAuthDocCount, URAuthDoc<T::AccountId>), DispatchError> {
-        let (count, doc_id) = Self::doc_id()?;
-        Ok((
-            count,
-            URAuthDoc::new(
-                doc_id,
-                MultiDID::new(owner_did, 1),
-                Self::unix_time(),
-                asset,
-                data_source,
-            ),
+    ) -> Result<URAuthDoc<T::AccountId>, DispatchError> {
+        let doc_id = Self::doc_id()?;
+        Ok(URAuthDoc::new(
+            doc_id,
+            MultiDID::new(owner_did, 1),
+            Self::unix_time(),
+            asset,
+            data_source,
         ))
     }
 
@@ -645,14 +643,15 @@ impl<T: Config> Pallet<T> {
         verficiation_submission: VerificationSubmission<T>,
         uri: &URI,
         owner_did: T::AccountId,
+        claim_type: ClaimType
     ) -> Result<(), DispatchError> {
         match res {
             VerificationSubmissionResult::Complete => {
-                let (count, urauth_doc) = Self::new_urauth_doc(owner_did, None, None)?;
+                let urauth_doc = Self::new_urauth_doc(owner_did, None, None)?;
                 URAuthTree::<T>::insert(&uri, urauth_doc.clone());
                 Self::remove_all_uri_related(uri.clone());
                 Self::deposit_event(Event::<T>::URAuthTreeRegistered {
-                    count,
+                    claim_type,
                     uri: uri.clone(),
                     urauth_doc,
                 })
@@ -678,7 +677,7 @@ impl<T: Config> Pallet<T> {
         uri: &URI,
         owner_did: &OwnerDID,
         challenge: Vec<u8>,
-    ) -> Result<T::AccountId, DispatchError> {
+    ) -> Result<(T::AccountId, ClaimType), DispatchError> {
         let multi_sig = Self::raw_signature_to_multi_sig(&proof_type, &sig)?;
         let signer = Self::account_id32_from_raw_did(owner_did.to_vec())?;
         if !multi_sig.verify(&raw_payload[..], &signer) {
@@ -689,7 +688,7 @@ impl<T: Config> Pallet<T> {
         Self::check_is_valid_owner(&uri_metadata.owner_did, &signer)
             .map_err(|_| Error::<T>::BadSigner)?;
         Self::check_challenge_value(uri, challenge)?;
-        Ok(signer)
+        Ok((signer, uri_metadata.claim_type))
     }
 
     /// Check whether `owner` and `signer` are identical
