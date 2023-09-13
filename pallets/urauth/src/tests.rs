@@ -706,49 +706,23 @@ fn parse_string_works() {
     println!("Root domain => {:?}", domain_name.root().expect("No Root"));
 }
 
-fn root_helper(uri: &str) {
-
-    match ada_url::Url::parse(uri, None) {
-        Ok(url) => {
-            let mut root = url.host();
-            // check port
-            if root.contains(":") {
-                root = root.split(':').collect::<Vec<&str>>()[0];
-            }
-            match addr::parse_domain_name(root) {
-                Ok(domain) => {
-                    println!("{:?}", domain.root().unwrap());
-                },
-                Err(e) => {
-                    println!("{:?}", e);
-                }
-            }
-        },
-        Err(_) => {
-            match addr::parse_domain_name(uri) {
-                Ok(domain) => {
-                    println!("{:?}", domain.root().unwrap());
-                },
-                Err(_) => {
-                    let parse = uri.split('/').collect::<Vec<&str>>();
-                    println!("{:?}", parse.first().unwrap());
-                }
-            }
-        }
-    };
+#[test]
+fn parser_works() {
+    parse_and_check_root("https://instagram.com", "instagram.com");
+    parse_and_check_root("https://www.instagram.com", "instagram.com");
+    parse_and_check_root("https://sub2.sub1.www.instagram.com", "instagram.com");
+    parse_and_check_root("www.instagram.com", "instagram.com");
+    parse_and_check_root("instagram.com", "instagram.com");
+    parse_and_check_root("instagram.com/user", "instagram.com");
+    parse_and_check_root("instagram.com/user/challenge.json", "instagram.com");
+    parse_and_check_root("ftp://sub2.sub1.www.instagram.com", "ftp://instagram.com");
+    parse_and_check_root("smtp://sub2.sub1.www.instagram.com", "smtp://instagram.com");
 }
 
-#[test]
-fn parse_root_works() {
-    
-    root_helper("https://instagram.com");
-    root_helper("https://www.instagram.com:8000");
-    root_helper("https://www.instagram.com:8000/image.html");
-    root_helper("https://www.instagram.com");
-    root_helper("www.instagram.com");
-    root_helper("https://sub2.sub1.www.instagram.com");
-    root_helper("https://sub3.sub2.sub1.www.instagram.com");
-    root_helper("instagram.com");
-    root_helper("instagram.com/user");
-    root_helper("instagram.com/user/image");
+fn parse_and_check_root(url: &str, expect: &str) {
+    let urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
+    let url: String = url.into();
+    let raw_url: Vec<u8> = url.clone().into();
+    let root_uri = <URAuthParser as Parser<Test>>::root_uri(&raw_url).unwrap();
+    assert!(root_uri == urauth_helper.bounded_uri(Some(expect.into())));
 }

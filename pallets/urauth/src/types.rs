@@ -1,3 +1,5 @@
+use core::f64::consts::E;
+
 use super::*;
 
 use codec::{Decode, Encode, MaxEncodedLen};
@@ -705,7 +707,9 @@ pub trait Parser<T: Config> {
 
     type ChallengeValue: Default;
 
-    fn url(raw_url: &Vec<u8>) -> Result<(), DispatchError>;
+    fn root_uri(raw_url: &Vec<u8>) -> Result<URI, DispatchError>;
+
+    fn parent_uris(raw_url: &Vec<u8>) -> Result<Vec<URI>, DispatchError>;
 
     fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
         Ok(Default::default())
@@ -717,13 +721,77 @@ impl<T: Config> Parser<T> for URAuthParser {
 
     type ChallengeValue = Vec<u8>;
 
-    fn url(raw_url: &Vec<u8>) -> Result<(), DispatchError> {
-        let url = sp_std::str::from_utf8(&raw_url[..])
+    fn root_uri(raw_url: &Vec<u8>) -> Result<URI, DispatchError> {
+        let maybe_root = sp_std::str::from_utf8(&raw_url[..])
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
-        let url = ada_url::Url::parse(url, None)
+        match ada_url::Url::parse(maybe_root, None) {
+            Ok(url) => {
+                let mut root = url.host();
+                let mut protocol: Option<&str> = None;
+                if url.scheme_type() != ada_url::SchemeType::Http && 
+                    url.scheme_type() != ada_url::SchemeType::Https {
+                    protocol = Some(url.protocol());
+                }
+                let domain = addr::parse_domain_name(root)
+                    .map_err(|e| {
+                        sp_std::if_std! { println!("{:?}", e) }
+                        Error::<T>::ErrorOnParse
+                    })?;
+                root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
+                if let Some(protocol) = protocol {
+                    let mut raw_root: Vec<u8> = Vec::new();
+                    raw_root.append(&mut protocol.as_bytes().to_vec());
+                    raw_root.append(&mut "//".as_bytes().to_vec());
+                    raw_root.append(&mut root.as_bytes().to_vec());
+                    return Ok(
+                        raw_root.try_into().map_err(|_| Error::<T>::OverMaxSize)?
+                    )
+                }
+                Ok(
+                    root
+                        .as_bytes()
+                        .to_vec()
+                        .try_into()
+                        .map_err(|_| Error::<T>::OverMaxSize)?
+                )
+            },
+            Err(e) => { 
+                sp_std::if_std! { println!("{:?}", e) }
+                let mut root = maybe_root;
+                match addr::parse_domain_name(root) {
+                    Ok(domain) => {
+                        root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
+                    },
+                    Err(e) => {
+                        sp_std::if_std! { println!("{:?}", e) }
+                        root = root
+                            .split('/')
+                            .collect::<Vec<&str>>()
+                            .first()
+                            .ok_or(Error::<T>::ErrorOnParse)?;
+                    }
+                }
+                Ok(
+                    root
+                        .as_bytes()
+                        .to_vec()
+                        .try_into()
+                        .map_err(|_| Error::<T>::OverMaxSize)?
+                )
+            }
+        }
+    }
+    
+    fn parent_uris(raw_url: &Vec<u8>) -> Result<Vec<URI>, DispatchError> {
+        let input = sp_std::str::from_utf8(raw_url)
             .map_err(|_| Error::<T>::ErrorOnParse)?;
+        match ada_url::Url::parse(input, None) {
+            Ok(url) => { 
 
-        Ok(())
+                Ok(Default::default()
+            )},
+            Err(_) => { Ok(Default::default())}
+        }
     }
 }
 
