@@ -327,21 +327,7 @@ fn update_urauth_doc_works() {
         let mut urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
         debug_doc(&urauth_doc);
 
-        let update_doc_field = UpdateDocField::AccessRules(Some(vec![AccessRule::AccessRuleV1 {
-            path: "/raf".as_bytes().to_vec().try_into().expect("Too long!"),
-            rules: vec![Rule {
-                user_agents: vec!["GPTBOT".as_bytes().to_vec().try_into().expect("Too long")],
-                allow: vec![(
-                    ContentType::Image,
-                    Price {
-                        price: 100,
-                        decimals: 4,
-                        unit: PriceUnit::USDPerMb,
-                    },
-                )],
-                disallow: vec![ContentType::Video, ContentType::Code],
-            }],
-        }]));
+        let update_doc_field = UpdateDocField::AccessRules(None);
         urauth_doc.update_doc(update_doc_field.clone(), 1).unwrap();
         let update_signature = urauth_helper.create_sr25519_signature(
             Alice,
@@ -361,13 +347,22 @@ fn update_urauth_doc_works() {
                 proof: update_signature.into()
             })
         ));
-        let mut urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
-        debug_doc(&urauth_doc);
 
-        let update_doc_field = UpdateDocField::MultiDID(WeightedDID {
-            did: Bob.to_account_id(),
-            weight: 1,
-        });
+        let update_doc_field = UpdateDocField::AccessRules(Some(vec![AccessRule::AccessRuleV1 {
+            path: "/raf".as_bytes().to_vec().try_into().expect("Too long!"),
+            rules: vec![Rule {
+                user_agents: vec!["GPTBOT".as_bytes().to_vec().try_into().expect("Too long")],
+                allow: vec![(
+                    ContentType::Image,
+                    Price {
+                        price: 100,
+                        decimals: 4,
+                        unit: PriceUnit::USDPerMb,
+                    },
+                )],
+                disallow: vec![ContentType::Video, ContentType::Code],
+            }],
+        }]));
         urauth_doc.update_doc(update_doc_field.clone(), 2).unwrap();
         let update_signature = urauth_helper.create_sr25519_signature(
             Alice,
@@ -387,11 +382,13 @@ fn update_urauth_doc_works() {
                 proof: update_signature.into()
             })
         ));
-
         let mut urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
         debug_doc(&urauth_doc);
 
-        let update_doc_field = UpdateDocField::<MockAccountId>::Threshold(2);
+        let update_doc_field = UpdateDocField::MultiDID(WeightedDID {
+            did: Bob.to_account_id(),
+            weight: 1,
+        });
         urauth_doc.update_doc(update_doc_field.clone(), 3).unwrap();
         let update_signature = urauth_helper.create_sr25519_signature(
             Alice,
@@ -415,11 +412,35 @@ fn update_urauth_doc_works() {
         let mut urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
         debug_doc(&urauth_doc);
 
+        let update_doc_field = UpdateDocField::<MockAccountId>::Threshold(2);
+        urauth_doc.update_doc(update_doc_field.clone(), 4).unwrap();
+        let update_signature = urauth_helper.create_sr25519_signature(
+            Alice,
+            ProofType::Update(
+                bounded_uri.clone(),
+                urauth_doc.clone(),
+                bounded_owner_did.clone(),
+            ),
+        );
+        assert_ok!(URAuth::update_urauth_doc(
+            RuntimeOrigin::signed(Alice.to_account_id()),
+            bounded_uri.clone(),
+            update_doc_field,
+            4u128,
+            Some(Proof::ProofV1 {
+                did: bounded_owner_did.clone(),
+                proof: update_signature.into()
+            })
+        ));
+
+        let mut urauth_doc = URAuthTree::<Test>::get(&bounded_uri).unwrap();
+        debug_doc(&urauth_doc);
+
         let update_doc_field = UpdateDocField::MultiDID(WeightedDID {
             did: Charlie.to_account_id(),
             weight: 1,
         });
-        urauth_doc.update_doc(update_doc_field.clone(), 4).unwrap();
+        urauth_doc.update_doc(update_doc_field.clone(), 5).unwrap();
         let update_signature = urauth_helper.create_sr25519_signature(
             Alice,
             ProofType::Update(
@@ -436,7 +457,7 @@ fn update_urauth_doc_works() {
             RuntimeOrigin::signed(Alice.to_account_id()),
             bounded_uri.clone(),
             update_doc_field,
-            4,
+            5,
             Some(Proof::ProofV1 {
                 did: bounded_owner_did.clone(),
                 proof: update_signature.into()
@@ -472,7 +493,7 @@ fn update_urauth_doc_works() {
             did: Charlie.to_account_id(),
             weight: 1,
         });
-        urauth_doc.update_doc(update_doc_field.clone(), 4).unwrap();
+        urauth_doc.update_doc(update_doc_field.clone(), 5).unwrap();
         let bob_did: OwnerDID = urauth_helper
             .generate_did(BOB_SS58)
             .as_bytes()
@@ -487,7 +508,7 @@ fn update_urauth_doc_works() {
             RuntimeOrigin::signed(Bob.to_account_id()),
             bounded_uri.clone(),
             update_doc_field,
-            4,
+            5,
             Some(Proof::ProofV1 {
                 did: bob_did,
                 proof: update_signature.into()
@@ -671,9 +692,63 @@ fn parse_string_works() {
 
     let u = Url::parse("http://sub2.sub1.instagram.com/coco/post", None)
         .expect("bad url");
-    println!("{:?}", u.protocol());
-    println!("{:?}", u.hostname());
-    println!("{:?}", u.pathname());
+    let host = u.host();
+    println!("Host => {:?}", host);
+    let all_path = u.pathname().split('/').collect::<Vec<&str>>();
+    let all_path = all_path.into_iter().filter(|p| p.len() != 0).collect::<Vec<&str>>();
+    println!("All path => {:?}", all_path);
     let domain_name = parse_domain_name(u.hostname()).expect("Bad URL");
-    println!("{:?}", domain_name.root());
+    if domain_name.prefix().is_some() {
+        let prefix = domain_name.prefix().expect("Checked!");
+        let prefix = prefix.split(['.']).collect::<Vec<&str>>();
+        println!(" Prefix => {:?}", prefix);
+    }
+    println!("Root domain => {:?}", domain_name.root().expect("No Root"));
+}
+
+fn root_helper(uri: &str) {
+
+    match ada_url::Url::parse(uri, None) {
+        Ok(url) => {
+            let mut root = url.host();
+            // check port
+            if root.contains(":") {
+                root = root.split(':').collect::<Vec<&str>>()[0];
+            }
+            match addr::parse_domain_name(root) {
+                Ok(domain) => {
+                    println!("{:?}", domain.root().unwrap());
+                },
+                Err(e) => {
+                    println!("{:?}", e);
+                }
+            }
+        },
+        Err(_) => {
+            match addr::parse_domain_name(uri) {
+                Ok(domain) => {
+                    println!("{:?}", domain.root().unwrap());
+                },
+                Err(_) => {
+                    let parse = uri.split('/').collect::<Vec<&str>>();
+                    println!("{:?}", parse.first().unwrap());
+                }
+            }
+        }
+    };
+}
+
+#[test]
+fn parse_root_works() {
+    
+    root_helper("https://instagram.com");
+    root_helper("https://www.instagram.com:8000");
+    root_helper("https://www.instagram.com:8000/image.html");
+    root_helper("https://www.instagram.com");
+    root_helper("www.instagram.com");
+    root_helper("https://sub2.sub1.www.instagram.com");
+    root_helper("https://sub3.sub2.sub1.www.instagram.com");
+    root_helper("instagram.com");
+    root_helper("instagram.com/user");
+    root_helper("instagram.com/user/image");
 }

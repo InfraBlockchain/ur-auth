@@ -701,6 +701,32 @@ impl sp_runtime::traits::Printable for UpdateDocStatusError {
     }
 }
 
+pub trait Parser<T: Config> {
+
+    type ChallengeValue: Default;
+
+    fn url(raw_url: &Vec<u8>) -> Result<(), DispatchError>;
+
+    fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
+        Ok(Default::default())
+    }
+}
+
+pub struct URAuthParser;
+impl<T: Config> Parser<T> for URAuthParser {
+
+    type ChallengeValue = Vec<u8>;
+
+    fn url(raw_url: &Vec<u8>) -> Result<(), DispatchError> {
+        let url = sp_std::str::from_utf8(&raw_url[..])
+            .map_err(|_| Error::<T>::ErrorConvertToString)?;
+        let url = ada_url::Url::parse(url, None)
+            .map_err(|_| Error::<T>::ErrorOnParse)?;
+
+        Ok(())
+    }
+}
+
 pub mod max_size {
 
     use super::*;

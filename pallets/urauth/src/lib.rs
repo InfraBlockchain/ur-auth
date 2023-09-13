@@ -2,6 +2,8 @@
 
 use codec::Encode;
 use fixedstr::zstr;
+use ada_url::Url;
+use addr::parse_domain_name;
 
 use frame_support::{
     pallet_prelude::*,
@@ -273,6 +275,8 @@ pub mod pallet {
         ErrorOnUpdateDoc,
         /// General error on updating `URAuthDocUpdateStatus`(e.g ProofMissing for updating `URAuthDoc`)
         ErrorOnUpdateDocStatus,
+        /// General error on parsing (e.g URI, Challenge Value)
+        ErrorOnParse,
         /// Error on some authorized calls which required origin as Oracle member
         NotOracleMember,
         /// Error when signer of signature is not `URAuthDoc` owner.
@@ -645,7 +649,6 @@ impl<T: Config> Pallet<T> {
         match res {
             VerificationSubmissionResult::Complete => {
                 let (count, urauth_doc) = Self::new_urauth_doc(owner_did, None, None)?;
-                Counter::<T>::put(count);
                 URAuthTree::<T>::insert(&uri, urauth_doc.clone());
                 Self::remove_all_uri_related(uri.clone());
                 Self::deposit_event(Event::<T>::URAuthTreeRegistered {
