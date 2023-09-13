@@ -626,7 +626,6 @@ impl<T: Config> Pallet<T> {
         match res {
             VerificationSubmissionResult::Complete => {
                 let (count, urauth_doc) = Self::new_urauth_doc(owner_did, None, None)?;
-                Counter::<T>::put(count);
                 URAuthTree::<T>::insert(&uri, urauth_doc.clone());
                 Self::remove_all_uri_related(uri.clone());
                 Self::deposit_event(Event::<T>::URAuthTreeRegistered {
