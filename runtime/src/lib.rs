@@ -532,6 +532,7 @@ impl system_token_aggregator::Config for Runtime {
 
 parameter_types! {
     pub const MaxOracleMembers: u32 = 10;
+    pub const MaxURIByOracle: u32 = 100;
 }
 
 impl pallet_urauth::Config for Runtime {
@@ -539,6 +540,7 @@ impl pallet_urauth::Config for Runtime {
     type AuthorizedOrigin = EnsureRoot<AccountId>;
     type UnixTime = Timestamp;
     type MaxOracleMembers = MaxOracleMembers;
+    type MaxURIByOracle = MaxURIByOracle;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.

@@ -2,8 +2,6 @@
 
 use codec::Encode;
 use fixedstr::zstr;
-use ada_url::Url;
-use addr::parse_domain_name;
 
 use frame_support::{
     pallet_prelude::*,
@@ -84,7 +82,7 @@ pub mod pallet {
     ///
     /// URIMetadata
     #[pallet::storage]
-    pub type URIMetadata<T: Config> = StorageMap<_, Twox128, URI, Metadata>;
+    pub type Metadata<T: Config> = StorageMap<_, Twox128, URI, RequestMetadata>;
 
     #[pallet::storage]
     pub type DataSet<T: Config> = StorageMap<_, Twox128, URI, DataSetMetadata<AnyText>>;
@@ -243,6 +241,14 @@ pub mod pallet {
             urauth_doc: URAuthDoc<T::AccountId>,
             update_doc_status: UpdateDocStatus<T::AccountId>,
         },
+        /// List of `URIByOracle` has been added
+        URIByOracleAdded {
+            uri: URI,
+        },
+        /// List of `URIByOracle` has been removed
+        URIByOracleRemoved {
+            uri: URI,
+        },
         /// Request of registering URI has been removed.
         Removed { uri: URI },
     }
@@ -342,7 +348,7 @@ pub mod pallet {
             };
 
             ChallengeValue::<T>::insert(&bounded_uri, cv);
-            URIMetadata::<T>::insert(&bounded_uri, Metadata::new(bounded_owner_did, cv, claim_type));
+            Metadata::<T>::insert(&bounded_uri, RequestMetadata::new(bounded_owner_did, cv, claim_type));
 
             Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri: bounded_uri });
 
@@ -545,6 +551,26 @@ pub mod pallet {
         }
 
         // Description:
+        // This transaction involves adding members of the Oracle node to the verification request after downloading the Challenge Value.
+        //
+        // Origin:
+        // ** Root(Authorized) privileged call **
+        //
+        // Params:
+        // - who: Whom to be included as Oracle member
+        #[pallet::call_index(5)]
+        #[pallet::weight(1_000)]
+        pub fn kick_oracle_member(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
+            T::AuthorizedOrigin::ensure_origin(origin)?;
+
+            OracleMembers::<T>::mutate(|m| {
+                m.try_push(who).map_err(|_| Error::<T>::MaxOracleMembers)
+            })?;
+
+            Ok(())
+        }
+
+        // Description:
         // This transaction allows for the update of various configurations within the URAuth pallet.
         //
         // Origin:
@@ -552,7 +578,7 @@ pub mod pallet {
         //
         // Params:
         // - randomness_enabled: Flag whether to create its randomness on-chain
-        #[pallet::call_index(5)]
+        #[pallet::call_index(6)]
         #[pallet::weight(1_000)]
         pub fn update_urauth_config(
             origin: OriginFor<T>,
@@ -564,6 +590,46 @@ pub mod pallet {
                 challenge_value_config.randomness_enabled = randomness_enabled;
             });
 
+            Ok(())
+        }
+
+        #[pallet::call_index(7)]
+        #[pallet::weight(1_000)]
+        pub fn add_uri_by_oracle(
+            origin: OriginFor<T>,
+            uri: Vec<u8>
+        ) -> DispatchResult {
+            // ToDo: Governance 
+            T::AuthorizedOrigin::ensure_origin(origin)?;
+            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            URIByOracle::<T>::try_mutate(|uris| -> DispatchResult {
+                uris.try_push(bounded_uri.clone()).map_err(|_| Error::<T>::OverMaxSize)?;
+                Ok(())
+            })?;
+            Self::deposit_event(Event::<T>::URIByOracleAdded { uri: bounded_uri });
+            Ok(())
+        }
+
+        #[pallet::call_index(8)]
+        #[pallet::weight(1_000)]
+        pub fn remove_uri_by_oracle(
+            origin: OriginFor<T>,
+            uri: Vec<u8>
+        ) -> DispatchResult {
+            // ToDo: Governance 
+            T::AuthorizedOrigin::ensure_origin(origin)?;
+            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            URIByOracle::<T>::try_mutate(|uris| -> DispatchResult {
+                let uri = uris.into_iter()
+                    .filter(|u| {
+                        *u != &bounded_uri
+                    })
+                    .map(|u| u.clone())
+                    .collect::<Vec<URI>>();
+                *uris = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                Ok(())
+            })?;
+            Self::deposit_event(Event::<T>::URIByOracleRemoved { uri: bounded_uri });
             Ok(())
         }
     }
@@ -683,7 +749,7 @@ impl<T: Config> Pallet<T> {
         if !multi_sig.verify(&raw_payload[..], &signer) {
             return Err(Error::<T>::BadProof.into());
         }
-        let uri_metadata = URIMetadata::<T>::get(uri).ok_or(Error::<T>::BadRequest)?;
+        let uri_metadata = Metadata::<T>::get(uri).ok_or(Error::<T>::BadRequest)?;
         let signer = Self::account_id_from_source(AccountIdSource::DID(owner_did.to_vec()))?;
         Self::check_is_valid_owner(&uri_metadata.owner_did, &signer)
             .map_err(|_| Error::<T>::BadSigner)?;
@@ -871,7 +937,7 @@ impl<T: Config> Pallet<T> {
     /// ## Changes
     /// `URIMetadata`, `URIVerificationInfo`, `ChallengeValue`
     fn remove_all_uri_related(uri: URI) {
-        URIMetadata::<T>::remove(&uri);
+        Metadata::<T>::remove(&uri);
         URIVerificationInfo::<T>::remove(&uri);
         ChallengeValue::<T>::remove(&uri);
 

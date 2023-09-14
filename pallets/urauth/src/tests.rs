@@ -1,6 +1,6 @@
 pub use crate::{self as pallet_urauth, mock::*, Event as URAuthEvent, *};
 
-use frame_support::{assert_noop, assert_ok, debug};
+use frame_support::{assert_noop, assert_ok};
 use sp_keyring::AccountKeyring::*;
 use sp_runtime::{traits::BlakeTwo256, AccountId32, MultiSigner};
 
@@ -110,8 +110,8 @@ fn verfiication_submission_update_status_works() {
     assert_eq!(
         res,
         Err(sp_runtime::DispatchError::Module(sp_runtime::ModuleError {
-            index: 2,
-            error: [13, 0, 0, 0],
+            index: 99,
+            error: [20, 0, 0, 0],
             message: Some("AlreadySubmitted")
         }))
     );
@@ -159,7 +159,7 @@ fn urauth_request_register_ownership_works() {
             signer.clone(),
             signature.clone()
         ));
-        let metadata = URIMetadata::<Test>::get(&bounded_uri).unwrap();
+        let metadata = Metadata::<Test>::get(&bounded_uri).unwrap();
         assert!(
             String::from_utf8_lossy(&metadata.owner_did) == urauth_helper.owner_did()
                 && metadata.challenge_value == urauth_helper.challenge_value()
@@ -715,6 +715,7 @@ fn parse_string_works() {
 
 #[test]
 fn parser_works() {
+
     parse_and_check_root("http://instagram.com", "instagram.com");
     parse_and_check_root("https://instagram.com", "instagram.com");
     parse_and_check_root("https://www.instagram.com", "instagram.com");
@@ -725,12 +726,25 @@ fn parser_works() {
     parse_and_check_root("instagram.com/user/challenge.json", "instagram.com");
     parse_and_check_root("ftp://sub2.sub1.www.instagram.com", "ftp://instagram.com");
     parse_and_check_root("smtp://sub2.sub1.www.instagram.com", "smtp://instagram.com");
+    
+    assert!(<URAuthParser as Parser<Test>>::parent_uris(&"https://instagram.com".as_bytes().to_vec()).unwrap().is_none());
+    assert!(<URAuthParser as Parser<Test>>::parent_uris(&"https://instagram.com/yoonszone".as_bytes().to_vec()).unwrap().is_some());
+    assert!(<URAuthParser as Parser<Test>>::parent_uris(&"https://instagram.com/yoonszone/saved".as_bytes().to_vec()).unwrap().is_some());
+    // assert_eq!(
+    //     <URAuthParser as Parser<Test>>::parent_uris(&"https://instagram.com/yoonszone/saved".as_bytes().to_vec()).unwrap(),
+    //     Some(
+    //         vec![
+    //             "instagram.com/yoonszone".as_bytes().to_vec().try_into().expect(""),
+    //             "instagram.com".as_bytes().to_vec().try_into().expect(""),
+    //         ]
+    //     )
+    // );
 }
 
 fn parse_and_check_root(url: &str, expect: &str) {
     let urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
     let url: String = url.into();
     let raw_url: Vec<u8> = url.clone().into();
-    let root_uri = <URAuthParser as Parser<Test>>::root_uri(&raw_url).unwrap();
+    let root_uri = <URAuthParser as Parser<Test>>::base_uri(&raw_url).unwrap();
     assert!(root_uri == urauth_helper.bounded_uri(Some(expect.into())));
 }

@@ -1,4 +1,3 @@
-use core::f64::consts::E;
 
 use super::*;
 
@@ -48,15 +47,23 @@ impl<BoundedString> DataSetMetadata<BoundedString> {
     }
 }
 
+#[derive(Encode, Decode, Default, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub struct URIPart {
+    pub protocol: Option<Vec<u8>>,
+    pub sub_domain: Option<Vec<Vec<u8>>>,
+    pub base_domain: Vec<u8>,
+    pub path: Option<Vec<Vec<u8>>>
+}
+
 /// Metadata for verifying challenge value
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-pub struct Metadata {
+pub struct RequestMetadata {
     pub owner_did: OwnerDID,
     pub challenge_value: Randomness,
     pub claim_type: ClaimType
 }
 
-impl Metadata {
+impl RequestMetadata {
     pub fn new(
         owner_did: OwnerDID, 
         challenge_value: Randomness,
@@ -713,13 +720,17 @@ pub trait Parser<T: Config> {
 
     type ChallengeValue: Default;
 
-    fn root_uri(raw_url: &Vec<u8>) -> Result<URI, DispatchError>;
+    fn base_uri(raw_url: &Vec<u8>) -> Result<URI, DispatchError>;
 
     fn parent_uris(raw_url: &Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError>;
 
     fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
         Ok(Default::default())
     }
+
+    fn is_base_uri(raw_url: &Vec<u8>) -> Result<bool, DispatchError>;
+
+    fn deconstruct_uri(raw_url: &Vec<u8>) -> URIPart;
 }
 
 pub struct URAuthParser;
@@ -727,7 +738,7 @@ impl<T: Config> Parser<T> for URAuthParser {
 
     type ChallengeValue = Vec<u8>;
 
-    fn root_uri(raw_url: &Vec<u8>) -> Result<URI, DispatchError> {
+    fn base_uri(raw_url: &Vec<u8>) -> Result<URI, DispatchError> {
         let maybe_root = sp_std::str::from_utf8(&raw_url[..])
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
         match ada_url::Url::parse(maybe_root, None) {
@@ -791,14 +802,42 @@ impl<T: Config> Parser<T> for URAuthParser {
     fn parent_uris(raw_url: &Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError> {
         let input = sp_std::str::from_utf8(raw_url)
             .map_err(|_| Error::<T>::ErrorOnParse)?;
-        let root = <Self as Parser<T>>::root_uri(raw_url)?;
-        if input.as_bytes().to_vec() == root.to_vec() {
+        let base = <Self as Parser<T>>::base_uri(raw_url)?;
+        if <Self as Parser<T>>::is_base_uri(raw_url)? {
             return Ok(None)
         }
         match ada_url::Url::parse(input, None) {
-            Ok(url) => {Ok(Default::default())},
+            Ok(url) => {
+                sp_std::if_std! { 
+                    println!("URI => {:?}", url); 
+                    println!("URI => {:?}", url.pathname());
+                }
+                let paths = url.pathname().split('/').collect::<Vec<&str>>();
+                sp_std::if_std! {
+                    println!("{:?}", paths);
+                }
+                if paths.len() == 2 {
+                    return Ok(None)
+                }
+                let mut parents: Vec<URI> = Vec::new();
+                let paths = url.pathname().split('/').collect::<Vec<&str>>();
+                sp_std::if_std! {
+                    println!("{:?}", paths);
+                }
+                parents.push(base);
+                Ok(Some(parents))
+            },
             Err(_) => { Ok(Default::default())}
         }
+    }
+
+    fn is_base_uri(raw_url: &Vec<u8>) -> Result<bool, DispatchError> {
+        let base_uri = <Self as Parser<T>>::base_uri(raw_url)?;
+        Ok(raw_url == &base_uri.to_vec())
+    }
+
+    fn deconstruct_uri(raw_url: &Vec<u8>) -> URIPart {
+        Default::default()
     }
 }
 
