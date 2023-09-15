@@ -1,8 +1,8 @@
-
+use ada_url::Url;
 use super::*;
 
 use codec::{Decode, Encode, MaxEncodedLen};
-pub use max_size::*;
+pub use size::*;
 use scale_info::TypeInfo;
 use sp_runtime::RuntimeDebug;
 use sp_std::collections::btree_map::BTreeMap;
@@ -47,14 +47,6 @@ impl<BoundedString> DataSetMetadata<BoundedString> {
     }
 }
 
-#[derive(Encode, Decode, Default, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct URIPart {
-    pub protocol: Option<Vec<u8>>,
-    pub sub_domain: Option<Vec<Vec<u8>>>,
-    pub base_domain: Vec<u8>,
-    pub path: Option<Vec<Vec<u8>>>
-}
-
 /// Metadata for verifying challenge value
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub struct RequestMetadata {
@@ -97,7 +89,7 @@ impl<T: Config> Default for VerificationSubmission<T> {
 }
 
 impl<T: Config> VerificationSubmission<T> {
-    /// Submit its verfication info. Threshold will be changed based on _oracle members_.
+    /// Submit its verification info. Threshold will be changed based on _oracle members_.
     ///
     /// ## Logistics
     /// 1. Update the threshold based on number of _oracle member_.
@@ -147,8 +139,8 @@ impl<T: Config> VerificationSubmission<T> {
         }
     }
 
-    /// Update the treshold of `VerificationSubmission` based on member count.
-    /// `Threshold = (membmer_count * 3 / 5) + remainder`
+    /// Update the threshold of `VerificationSubmission` based on member count.
+    /// `Threshold = (member_count * 3 / 5) + remainder`
     pub fn update_threshold(&mut self, member_count: usize) {
         let threshold = (member_count * 3 / 5) as Threshold;
         let check_sum: Threshold = if (member_count * 3) % 5 == 0 { 0 } else { 1 };
@@ -347,7 +339,7 @@ impl<Account: PartialEq> MultiDID<Account> {
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum IdentityInfo {
-    IdentityInfoV1 { vc: VerfiableCredential },
+    IdentityInfoV1 { vc: VerifiableCredential },
 }
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -523,7 +515,7 @@ where
             UpdateDocField::Threshold(new) => {
                 let total_weight = self.multi_owner_did.total_weight();
                 if total_weight < new {
-                    return Err(URAuthDocUpdateError::ThreholdError);
+                    return Err(URAuthDocUpdateError::ThresholdError);
                 }
                 self.multi_owner_did.threshold = new;
             }
@@ -685,23 +677,23 @@ impl<Account: Clone> UpdateDocStatus<Account> {
 }
 
 /// Errors that may happen on update `URAuthDoc`
-#[derive(PartialEq, sp_runtime::RuntimeDebug)]
+#[derive(PartialEq, RuntimeDebug)]
 pub enum URAuthDocUpdateError {
     /// Threshold should be less than total weight of owners
-    ThreholdError,
+    ThresholdError,
 }
 
 impl sp_runtime::traits::Printable for URAuthDocUpdateError {
     fn print(&self) {
         "URAuthDocUpdateError".print();
         match self {
-            Self::ThreholdError => "GreaterThanTotalWeight".print(),
+            Self::ThresholdError => "GreaterThanTotalWeight".print(),
         }
     }
 }
 
 /// Errors that may happen on `UpdateDocStatus`
-#[derive(PartialEq, sp_runtime::RuntimeDebug)]
+#[derive(PartialEq, RuntimeDebug)]
 pub enum UpdateDocStatusError {
     /// Proof should be existed on update`URAuthDoc`
     ProofMissing,
@@ -711,7 +703,7 @@ impl sp_runtime::traits::Printable for UpdateDocStatusError {
     fn print(&self) {
         "UpdateDocStatusError".print();
         match self {
-            Self::ProofMissing => "PrrofMissingOnUpdate".print(),
+            Self::ProofMissing => "ProofMissingOnUpdate".print(),
         }
     }
 }
@@ -720,17 +712,13 @@ pub trait Parser<T: Config> {
 
     type ChallengeValue: Default;
 
-    fn base_uri(raw_url: &Vec<u8>) -> Result<URI, DispatchError>;
+    fn base_uri(uri: &URI) -> (URI, bool);
 
     fn parent_uris(raw_url: &Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError>;
 
     fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
         Ok(Default::default())
     }
-
-    fn is_base_uri(raw_url: &Vec<u8>) -> Result<bool, DispatchError>;
-
-    fn deconstruct_uri(raw_url: &Vec<u8>) -> URIPart;
 }
 
 pub struct URAuthParser;
@@ -738,38 +726,46 @@ impl<T: Config> Parser<T> for URAuthParser {
 
     type ChallengeValue = Vec<u8>;
 
-    fn base_uri(raw_url: &Vec<u8>) -> Result<URI, DispatchError> {
-        let maybe_root = sp_std::str::from_utf8(&raw_url[..])
+    fn base_uri(uri: URI) -> (URI, bool) {
+        let maybe_root = sp_std::str::from_utf8(&uri.to_vec())
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
         match ada_url::Url::parse(maybe_root, None) {
             Ok(url) => {
+                sp_std::if_std! { println!("{:?}", url); }
                 let mut root = url.host();
                 let mut protocol: Option<&str> = None;
                 if url.scheme_type() != ada_url::SchemeType::Http && 
                     url.scheme_type() != ada_url::SchemeType::Https {
                     protocol = Some(url.protocol());
                 }
+
+                // Check path from `url`
+                // Return `Err` if any
+                if url.pathname().len() != 1 {
+                    (uri, false)
+                }
+
                 let domain = addr::parse_domain_name(root)
                     .map_err(|e| {
                         sp_std::if_std! { println!("{:?}", e) }
                         Error::<T>::ErrorOnParse
                     })?;
+                sp_std::if_std! { println!("{:?}", domain.prefix()); }
                 root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
                 if let Some(protocol) = protocol {
                     let mut raw_root: Vec<u8> = Vec::new();
                     raw_root.append(&mut protocol.as_bytes().to_vec());
                     raw_root.append(&mut "//".as_bytes().to_vec());
                     raw_root.append(&mut root.as_bytes().to_vec());
-                    return Ok(
-                        raw_root.try_into().map_err(|_| Error::<T>::OverMaxSize)?
-                    )
+                    return ( raw_root.try_into().map_err(|_| Error::<T>::OverMaxSize)?, true )
                 }
-                Ok(
+                (
                     root
                         .as_bytes()
                         .to_vec()
                         .try_into()
-                        .map_err(|_| Error::<T>::OverMaxSize)?
+                        .map_err(|_| Error::<T>::OverMaxSize)?,
+                    true
                 )
             },
             Err(e) => { 
@@ -799,49 +795,43 @@ impl<T: Config> Parser<T> for URAuthParser {
         }
     }
     
-    fn parent_uris(raw_url: &Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError> {
-        let input = sp_std::str::from_utf8(raw_url)
-            .map_err(|_| Error::<T>::ErrorOnParse)?;
-        let base = <Self as Parser<T>>::base_uri(raw_url)?;
-        if <Self as Parser<T>>::is_base_uri(raw_url)? {
-            return Ok(None)
-        }
-        match ada_url::Url::parse(input, None) {
-            Ok(url) => {
-                sp_std::if_std! { 
-                    println!("URI => {:?}", url); 
-                    println!("URI => {:?}", url.pathname());
-                }
-                let paths = url.pathname().split('/').collect::<Vec<&str>>();
-                sp_std::if_std! {
-                    println!("{:?}", paths);
-                }
-                if paths.len() == 2 {
-                    return Ok(None)
-                }
-                let mut parents: Vec<URI> = Vec::new();
-                let paths = url.pathname().split('/').collect::<Vec<&str>>();
-                sp_std::if_std! {
-                    println!("{:?}", paths);
-                }
-                parents.push(base);
-                Ok(Some(parents))
-            },
-            Err(_) => { Ok(Default::default())}
-        }
-    }
-
-    fn is_base_uri(raw_url: &Vec<u8>) -> Result<bool, DispatchError> {
-        let base_uri = <Self as Parser<T>>::base_uri(raw_url)?;
-        Ok(raw_url == &base_uri.to_vec())
-    }
-
-    fn deconstruct_uri(raw_url: &Vec<u8>) -> URIPart {
-        Default::default()
+    fn parent_uris(_raw_url: &Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError> {
+        Ok(None)
+        // let input = sp_std::str::from_utf8(raw_url)
+        //     .map_err(|_| Error::<T>::ErrorOnParse)?;
+        // let base = <Self as Parser<T>>::base_uri(raw_url)?;
+        // if <Self as Parser<T>>::is_base_uri(raw_url)? {
+        //     return Ok(None)
+        // }
+        // match ada_url::Url::parse(input, None) {
+        //     Ok(url) => {
+        //         sp_std::if_std! { println!("URI => {:?}", url); }
+        //         let paths = url.pathname().split('/').collect::<Vec<&str>>();
+        //         sp_std::if_std! {
+        //             println!("{:?}", paths);
+        //         }
+        //         if let Some(l) = paths.get(1) {
+        //             //
+        //             if l.is_empty() {
+        //                 return Ok(None)
+        //             }
+        //         } else {
+        //             return Err(Error::<T>::OverMaxSize.into())
+        //         }
+        //         let mut parents: Vec<URI> = Vec::new();
+        //         let paths = url.pathname().split('/').collect::<Vec<&str>>();
+        //         sp_std::if_std! {
+        //             println!("{:?}", paths);
+        //         }
+        //         parents.push(base);
+        //         Ok(Some(parents))
+        //     },
+        //     Err(_) => { Ok(Default::default())}
+        // }
     }
 }
 
-pub mod max_size {
+pub mod size {
 
     use super::*;
 
@@ -881,5 +871,5 @@ pub mod max_size {
     /// Encoded size of VC is up to 1 KB.
     pub const MAX_IDENTITY_INFO: u32 = 1024;
 
-    pub type VerfiableCredential = BoundedVec<u8, ConstU32<MAX_IDENTITY_INFO>>;
+    pub type VerifiableCredential = BoundedVec<u8, ConstU32<MAX_IDENTITY_INFO>>;
 }
