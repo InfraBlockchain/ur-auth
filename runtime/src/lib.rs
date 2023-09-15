@@ -537,10 +537,11 @@ parameter_types! {
 
 impl pallet_urauth::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
-    type AuthorizedOrigin = EnsureRoot<AccountId>;
+    type URAuthParser = pallet_urauth::URAuthParser;
     type UnixTime = Timestamp;
     type MaxOracleMembers = MaxOracleMembers;
     type MaxURIByOracle = MaxURIByOracle;
+    type AuthorizedOrigin = EnsureRoot<AccountId>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
