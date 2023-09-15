@@ -45,13 +45,23 @@ pub mod pallet {
     pub trait Config: frame_system::Config {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
+        /// Parser for URAuth Pallet such as _challenge-value_, _URI_
+        type URAuthParser: Parser<Self>;
+        /// Time used for computing document creation.
+        ///
+        /// It is guaranteed to start being called from the first `on_finalize`. Thus value at
+        /// genesis is not used.
         type UnixTime: UnixTime;
 
+        /// The current members of Oracle.
         type MaxOracleMembers: Get<u32>;
 
+        /// URI list which should be verified by _Oracle_
         #[pallet::constant]
         type MaxURIByOracle: Get<u32>;
 
+        /// The origin which may be used within _authorized_ call.
+        /// **Root** can always do this.
         type AuthorizedOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
 
@@ -141,7 +151,7 @@ pub mod pallet {
     ///
     /// **Value:**
     ///
-    /// BoundedVec<T::AccoutnId, T::MaxOracleMembers>
+    /// BoundedVec<T::AccountId, T::MaxOracleMembers>
     #[pallet::storage]
     #[pallet::getter(fn oracle_members)]
     pub type OracleMembers<T: Config> =
@@ -287,6 +297,8 @@ pub mod pallet {
         NotOracleMember,
         /// Error when signer of signature is not `URAuthDoc` owner.
         NotURAuthDocOwner,
+        /// Given URI is not URI which should be verified by Oracle
+        NotURIByOracle,
         /// General error on proof where it is required but it is not given.
         ProofMissing,
         /// Error when challenge value is not stored for requested URI.
@@ -649,7 +661,7 @@ impl<T: Config> Pallet<T> {
     }
 
     fn unix_time() -> u128 {
-        T::UnixTime::now().as_millis()
+        <T as Config>::UnixTime::now().as_millis()
     }
 
     fn challenge_value() -> Randomness {
@@ -706,7 +718,7 @@ impl<T: Config> Pallet<T> {
     /// Handle the result of _challenge value_ verification based on `VerificationSubmissionResult`
     fn handle_verification_submission_result(
         res: &VerificationSubmissionResult,
-        verficiation_submission: VerificationSubmission<T>,
+        verification_submission: VerificationSubmission<T>,
         uri: &URI,
         owner_did: T::AccountId,
         claim_type: ClaimType
@@ -724,7 +736,7 @@ impl<T: Config> Pallet<T> {
             }
             VerificationSubmissionResult::Tie => Self::remove_all_uri_related(uri.clone()),
             VerificationSubmissionResult::InProgress => {
-                URIVerificationInfo::<T>::insert(&uri, verficiation_submission)
+                URIVerificationInfo::<T>::insert(&uri, verification_submission)
             }
         }
 
@@ -735,7 +747,7 @@ impl<T: Config> Pallet<T> {
     ///
     /// 1. Check given signature
     /// 2. Check whether `signer` and `owner` are identical
-    /// 3. Check whether `given` challenge value is same with `onchain` challenge value
+    /// 3. Check whether `given` challenge value is same with `on-chain` challenge value
     fn try_verify_challenge_value(
         sig: Vec<u8>,
         proof_type: Vec<u8>,
@@ -768,7 +780,7 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
-    /// Check whether `given` challenge value is same with `onchain` challenge value
+    /// Check whether `given` challenge value is same with `on-chain` challenge value
     ///
     /// ## Errors
     ///
@@ -778,7 +790,7 @@ impl<T: Config> Pallet<T> {
     ///
     /// - `BadChallengeValue`
     ///
-    /// Given challenge value and onchain challenge value are not identical
+    /// Given challenge value and on-chain challenge value are not identical
     fn check_challenge_value(uri: &URI, challenge: Vec<u8>) -> Result<(), DispatchError> {
         let cv = ChallengeValue::<T>::get(&uri).ok_or(Error::<T>::ChallengeValueMissing)?;
         ensure!(challenge == cv.to_vec(), Error::<T>::BadChallengeValue);
@@ -786,7 +798,7 @@ impl<T: Config> Pallet<T> {
     }
 
     /// Update the `URAuthDoc` based on `UpdateDocField`.
-    /// If it is first time requestsed, `UpdateStatus` would be `Available`.
+    /// If it is first time requested, `UpdateStatus` would be `Available`.
     /// Otherwise, `InProgress { .. }`.
     ///
     /// ## Errors
@@ -944,7 +956,7 @@ impl<T: Config> Pallet<T> {
         Self::deposit_event(Event::<T>::Removed { uri })
     }
 
-    /// Try prase the raw-json and return opaque type of
+    /// Try parse the raw-json and return opaque type of
     /// (`Signature`, `proof type`, `payload`, `uri`, `owner_did`, `challenge`)
     ///
     /// ## Errors
@@ -960,7 +972,7 @@ impl<T: Config> Pallet<T> {
         let json_str = sp_std::str::from_utf8(challenge_value)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
 
-        match lite_json::parse_json(json_str) {
+        return match lite_json::parse_json(json_str) {
             Ok(obj) => match obj {
                 // ToDo: Check domain, admin_did, challenge
                 lite_json::JsonValue::Object(obj) => {
@@ -989,20 +1001,20 @@ impl<T: Config> Pallet<T> {
                         challenge: challenge.clone(),
                         timestamp,
                     }
-                    .using_encoded(|m| raw_payload = m.to_vec());
+                        .using_encoded(|m| raw_payload = m.to_vec());
 
-                    return Ok((
+                    Ok((
                         proof.to_vec(),
                         proof_type,
                         raw_payload,
                         bounded_uri,
                         bounded_owner_did,
                         challenge,
-                    ));
+                    ))
                 }
-                _ => return Err(Error::<T>::BadChallengeValue.into()),
+                _ => Err(Error::<T>::BadChallengeValue.into()),
             },
-            Err(_) => return Err(Error::<T>::BadChallengeValue.into()),
+            Err(_) => Err(Error::<T>::BadChallengeValue.into()),
         }
     }
 
