@@ -731,7 +731,6 @@ impl<T: Config> Parser<T> for URAuthParser {
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
         match ada_url::Url::parse(maybe_root, None) {
             Ok(url) => {
-                sp_std::if_std! { println!("{:?}", url); }
                 let mut root: &str = url.host();
                 let mut protocol: Option<&str> = None;
                 if url.scheme_type() != ada_url::SchemeType::Http && 
@@ -749,7 +748,6 @@ impl<T: Config> Parser<T> for URAuthParser {
                         sp_std::if_std! { println!("{:?}", e) }
                         Error::<T>::ErrorOnParse
                     })?;
-                sp_std::if_std! { println!("Prefix => {:?}", domain.prefix()); }
                 if domain.prefix() != None 
                     && domain.prefix() != Some("www") {
                     return Err(Error::<T>::NotBaseURI.into());
@@ -769,20 +767,14 @@ impl<T: Config> Parser<T> for URAuthParser {
                     .map_err(|_| Error::<T>::OverMaxSize)?
                 )
             },
-            Err(e) => { 
-                sp_std::if_std! { println!("{:?}", e) }
+            Err(_e) => { 
                 let mut root = maybe_root;
                 match addr::parse_domain_name(root) {
                     Ok(domain) => {
                         root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
                     },
-                    Err(e) => {
-                        sp_std::if_std! { println!("{:?}", e) }
-                        root = root
-                            .split('/')
-                            .collect::<Vec<&str>>()
-                            .first()
-                            .ok_or(Error::<T>::ErrorOnParse)?;
+                    Err(_e) => {
+                        return Err(Error::<T>::NotBaseURI.into())
                     }
                 }
                 Ok(root

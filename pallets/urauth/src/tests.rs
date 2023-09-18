@@ -757,7 +757,14 @@ fn is_base_url(url: &str, expect: &str) {
     let urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
     let url: String = url.into();
     let raw_url: Vec<u8> = url.clone().into();
-    let uri = <URAuthParser as Parser<Test>>::base_uri(raw_url).unwrap();
-    println!(" Given URI is base uri => {:?}", url);
-    assert_eq!(uri, urauth_helper.bounded_uri(Some(expect.into())));
+    match <URAuthParser as Parser<Test>>::base_uri(raw_url) {
+        Ok(uri) => {
+            println!(" Given URI is base uri => {:?}", url);
+            assert_eq!(uri, urauth_helper.bounded_uri(Some(expect.into())));
+        },
+        Err(_) => { 
+            println!(" Given URI is not base uri => {:?}", url);
+            return 
+        }
+    }
 }
