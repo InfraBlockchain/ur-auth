@@ -715,7 +715,7 @@ fn parser_works2() {
 
     assert_eq!(
         <URAuthParser as Parser<Test>>::base_uri(
-            &"https://instagram.com/user"
+            "https://instagram.com/user"
                 .as_bytes()
                 .to_vec()
                 .try_into()
@@ -724,19 +724,20 @@ fn parser_works2() {
     );
 }
 
+// cargo t -p pallet-urauth --lib -- tests::parser_works --exact --nocapture 
 #[test]
 fn parser_works() {
 
-    parse_and_check_root("http://instagram.com", "instagram.com");
-    parse_and_check_root("https://instagram.com", "instagram.com");
-    parse_and_check_root("https://www.instagram.com", "instagram.com");
-    parse_and_check_root("https://sub2.sub1.www.instagram.com", "instagram.com");
-    parse_and_check_root("www.instagram.com", "instagram.com");
-    parse_and_check_root("instagram.com", "instagram.com");
-    parse_and_check_root("instagram.com/user", "instagram.com");
-    parse_and_check_root("instagram.com/user/challenge.json", "instagram.com");
-    parse_and_check_root("ftp://sub2.sub1.www.instagram.com", "ftp://instagram.com");
-    parse_and_check_root("smtp://sub2.sub1.www.instagram.com", "smtp://instagram.com");
+    is_base_url("http://instagram.com", "instagram.com");
+    is_base_url("https://instagram.com", "instagram.com");
+    is_base_url("https://www.instagram.com", "instagram.com");
+    is_base_url("https://sub2.sub1.www.instagram.com", "instagram.com");
+    is_base_url("www.instagram.com", "instagram.com");
+    is_base_url("instagram.com", "instagram.com");
+    is_base_url("instagram.com/user", "instagram.com");
+    is_base_url("instagram.com/user/challenge.json", "instagram.com");
+    is_base_url("ftp://sub2.sub1.www.instagram.com", "ftp://instagram.com");
+    is_base_url("smtp://sub2.sub1.www.instagram.com", "smtp://instagram.com");
     
     // assert!(<URAuthParser as Parser<Test>>::parent_uris(&"https://instagram.com".as_bytes().to_vec()).unwrap().is_none());
     // assert!(<URAuthParser as Parser<Test>>::parent_uris(&"https://instagram.com/yoonszone".as_bytes().to_vec()).unwrap().is_some());
@@ -752,11 +753,11 @@ fn parser_works() {
     // );
 }
 
-fn parse_and_check_root(url: &str, expect: &str) {
+fn is_base_url(url: &str, expect: &str) {
     let urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
     let url: String = url.into();
     let raw_url: Vec<u8> = url.clone().into();
-    let uri: URI = raw_url.try_into().expect("Too long");
-    let root_uri = <URAuthParser as Parser<Test>>::base_uri(&uri).unwrap();
-    assert_eq!(root_uri, urauth_helper.bounded_uri(Some(expect.into())));
+    let uri = <URAuthParser as Parser<Test>>::base_uri(raw_url).unwrap();
+    println!(" Given URI is base uri => {:?}", url);
+    assert_eq!(uri, urauth_helper.bounded_uri(Some(expect.into())));
 }

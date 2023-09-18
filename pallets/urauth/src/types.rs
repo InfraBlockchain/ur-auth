@@ -1,4 +1,4 @@
-use ada_url::Url;
+
 use super::*;
 
 use codec::{Decode, Encode, MaxEncodedLen};
@@ -712,7 +712,7 @@ pub trait Parser<T: Config> {
 
     type ChallengeValue: Default;
 
-    fn base_uri(uri: &URI) -> (URI, bool);
+    fn base_uri(raw_uri: Vec<u8>) -> Result<URI, DispatchError>;
 
     fn parent_uris(raw_url: &Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError>;
 
@@ -726,23 +726,22 @@ impl<T: Config> Parser<T> for URAuthParser {
 
     type ChallengeValue = Vec<u8>;
 
-    fn base_uri(uri: URI) -> (URI, bool) {
-        let maybe_root = sp_std::str::from_utf8(&uri.to_vec())
+    fn base_uri(raw_uri: Vec<u8>) -> Result<URI, DispatchError> {
+        let maybe_root = sp_std::str::from_utf8(&raw_uri)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
         match ada_url::Url::parse(maybe_root, None) {
             Ok(url) => {
                 sp_std::if_std! { println!("{:?}", url); }
-                let mut root = url.host();
+                let mut root: &str = url.host();
                 let mut protocol: Option<&str> = None;
                 if url.scheme_type() != ada_url::SchemeType::Http && 
                     url.scheme_type() != ada_url::SchemeType::Https {
                     protocol = Some(url.protocol());
                 }
 
-                // Check path from `url`
-                // Return `Err` if any
+                // Check path from `url`. Return `Err` if any
                 if url.pathname().len() != 1 {
-                    (uri, false)
+                    return Err(Error::<T>::NotBaseURI.into());
                 }
 
                 let domain = addr::parse_domain_name(root)
@@ -750,22 +749,24 @@ impl<T: Config> Parser<T> for URAuthParser {
                         sp_std::if_std! { println!("{:?}", e) }
                         Error::<T>::ErrorOnParse
                     })?;
-                sp_std::if_std! { println!("{:?}", domain.prefix()); }
+                sp_std::if_std! { println!("Prefix => {:?}", domain.prefix()); }
+                if domain.prefix() != None 
+                    && domain.prefix() != Some("www") {
+                    return Err(Error::<T>::NotBaseURI.into());
+                }
                 root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
                 if let Some(protocol) = protocol {
                     let mut raw_root: Vec<u8> = Vec::new();
                     raw_root.append(&mut protocol.as_bytes().to_vec());
                     raw_root.append(&mut "//".as_bytes().to_vec());
                     raw_root.append(&mut root.as_bytes().to_vec());
-                    return ( raw_root.try_into().map_err(|_| Error::<T>::OverMaxSize)?, true )
+                    return Ok(raw_root.try_into().map_err(|_| Error::<T>::OverMaxSize)?)
                 }
-                (
-                    root
-                        .as_bytes()
-                        .to_vec()
-                        .try_into()
-                        .map_err(|_| Error::<T>::OverMaxSize)?,
-                    true
+                Ok(root
+                    .as_bytes()
+                    .to_vec()
+                    .try_into()
+                    .map_err(|_| Error::<T>::OverMaxSize)?
                 )
             },
             Err(e) => { 
@@ -784,12 +785,11 @@ impl<T: Config> Parser<T> for URAuthParser {
                             .ok_or(Error::<T>::ErrorOnParse)?;
                     }
                 }
-                Ok(
-                    root
-                        .as_bytes()
-                        .to_vec()
-                        .try_into()
-                        .map_err(|_| Error::<T>::OverMaxSize)?
+                Ok(root
+                    .as_bytes()
+                    .to_vec()
+                    .try_into()
+                    .map_err(|_| Error::<T>::OverMaxSize)?
                 )
             }
         }

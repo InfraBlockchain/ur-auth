@@ -299,6 +299,8 @@ pub mod pallet {
         NotURAuthDocOwner,
         /// Given URI is not URI which should be verified by Oracle
         NotURIByOracle,
+        /// Given URI is not base URI
+        NotBaseURI,
         /// General error on proof where it is required but it is not given.
         ProofMissing,
         /// Error when challenge value is not stored for requested URI.
