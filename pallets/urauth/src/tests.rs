@@ -710,61 +710,47 @@ fn parse_string_works() {
     println!("Root domain => {:?}", domain_name.root().expect("No Root"));
 }
 
-#[test]
-fn parser_works2() {
-
-    assert_eq!(
-        <URAuthParser as Parser<Test>>::base_uri(
-            "https://instagram.com/user"
-                .as_bytes()
-                .to_vec()
-                .try_into()
-                .expect("")
-        ).is_err(), true
-    );
-}
-
 // cargo t -p pallet-urauth --lib -- tests::parser_works --exact --nocapture 
 #[test]
 fn parser_works() {
 
-    is_base_url("http://instagram.com", "instagram.com");
-    is_base_url("https://instagram.com", "instagram.com");
-    is_base_url("https://www.instagram.com", "instagram.com");
-    is_base_url("https://sub2.sub1.www.instagram.com", "instagram.com");
-    is_base_url("www.instagram.com", "instagram.com");
-    is_base_url("instagram.com", "instagram.com");
-    is_base_url("instagram.com/user", "instagram.com");
-    is_base_url("instagram.com/user/challenge.json", "instagram.com");
-    is_base_url("ftp://sub2.sub1.www.instagram.com", "ftp://instagram.com");
-    is_base_url("smtp://sub2.sub1.www.instagram.com", "smtp://instagram.com");
+    is_root_domain("http://instagram.com", "instagram.com");
+    is_root_domain("https://instagram.com", "instagram.com");
+    is_root_domain("https://www.instagram.com", "instagram.com");
+    is_root_domain("https://sub2.sub1.www.instagram.com", "instagram.com");
+    is_root_domain("www.instagram.com", "instagram.com");
+    is_root_domain("instagram.com", "instagram.com");
+    is_root_domain("instagram.com/user", "instagram.com");
+    is_root_domain("instagram.com/user/challenge.json", "instagram.com");
+    is_root_domain("ftp://www.instagram.com", "ftp://instagram.com");
+    is_root_domain("ftp://instagram.com", "ftp://instagram.com");
+    is_root_domain("ftp://sub2.sub1.www.instagram.com", "ftp://instagram.com");
+    is_root_domain("smtp://sub2.sub1.www.instagram.com", "smtp://instagram.com");
     
-    // assert!(<URAuthParser as Parser<Test>>::parent_uris(&"https://instagram.com".as_bytes().to_vec()).unwrap().is_none());
-    // assert!(<URAuthParser as Parser<Test>>::parent_uris(&"https://instagram.com/yoonszone".as_bytes().to_vec()).unwrap().is_some());
-    // assert!(<URAuthParser as Parser<Test>>::parent_uris(&"https://instagram.com/yoonszone/saved".as_bytes().to_vec()).unwrap().is_some());
-    // assert_eq!(
-    //     <URAuthParser as Parser<Test>>::parent_uris(&"https://instagram.com/yoonszone/saved".as_bytes().to_vec()).unwrap(),
-    //     Some(
-    //         vec![
-    //             "instagram.com/yoonszone".as_bytes().to_vec().try_into().expect(""),
-    //             "instagram.com".as_bytes().to_vec().try_into().expect(""),
-    //         ]
-    //     )
-    // );
+    assert!(<URAuthParser as Parser<Test>>::parent_uris("https://instagram.com".as_bytes().to_vec()).unwrap().is_none());
+    assert!(<URAuthParser as Parser<Test>>::parent_uris("https://sub1.instagram.com".as_bytes().to_vec()).unwrap().is_none());
 }
 
-fn is_base_url(url: &str, expect: &str) {
+fn is_root_domain(url: &str, expect: &str) {
     let urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
     let url: String = url.into();
     let raw_url: Vec<u8> = url.clone().into();
-    match <URAuthParser as Parser<Test>>::base_uri(raw_url) {
+    match <URAuthParser as Parser<Test>>::is_root_domain(raw_url) {
         Ok(uri) => {
             println!(" Given URI is base uri => {:?}", url);
             assert_eq!(uri, urauth_helper.bounded_uri(Some(expect.into())));
         },
         Err(_) => { 
-            println!(" Given URI is not base uri => {:?}", url);
+            println!(" Given URI is not base uri. => {:?}", url);
+            println!(" Parse it! => {:?}", sp_std::str::from_utf8(&<URAuthParser as Parser<Test>>::root_domain(url.as_bytes().to_vec()).unwrap().to_vec()));
             return 
         }
     }
+}
+
+#[test]
+fn protocol_index_works() {
+    assert_eq!(URAuthParser::protocol_index_from_uri("instagram.com"), None);
+    assert_eq!(URAuthParser::protocol_index_from_uri("ftp://instagram.com"), Some(5));
+    assert_eq!(URAuthParser::protocol_index_from_uri("smtp://instagram.com"), Some(6));
 }

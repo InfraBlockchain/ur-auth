@@ -710,11 +710,14 @@ impl sp_runtime::traits::Printable for UpdateDocStatusError {
 
 pub trait Parser<T: Config> {
 
+    type URI; 
     type ChallengeValue: Default;
 
-    fn base_uri(raw_uri: Vec<u8>) -> Result<URI, DispatchError>;
+    fn is_root_domain(raw_uri: Vec<u8>) -> Result<Self::URI, DispatchError>;
 
-    fn parent_uris(raw_url: &Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError>;
+    fn root_domain(raw_uri: Vec<u8>) -> Result<Self::URI, DispatchError>;
+
+    fn parent_uris(raw_url: Vec<u8>) -> Result<Option<Vec<Self::URI>>, DispatchError>;
 
     fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
         Ok(Default::default())
@@ -722,16 +725,58 @@ pub trait Parser<T: Config> {
 }
 
 pub struct URAuthParser;
-impl<T: Config> Parser<T> for URAuthParser {
+impl URAuthParser {
+    /// Check if sub domain exists and if is 'www'.
+    fn check_sub_domain(domain: addr::domain::Name) -> bool {
+        if domain.prefix() != None 
+            && domain.prefix() != Some("www") 
+        {
+            return false
+        }
+        true
+    } 
 
+    pub fn protocol_index_from_uri(base_domain: &str) -> Option<usize> {
+        match base_domain.find(':') {
+            Some(i) => {
+                // ":"+ "//"
+                Some(i + 2)
+            },
+            None => {
+                None
+            }
+        }
+    }
+
+    fn parent_uris(base_domain: &str, sub_domains: Option<&str>, paths: Option<&str>) -> Option<Vec<URI>> {
+        let mut parent_uris: Vec<URI> = Vec::new();
+        match (sub_domains, paths) {
+            (Some(sub), Some(paths)) => {
+                Default::default()
+            },
+            (Some(sub), None) => {
+                Default::default()
+            },
+            (None, Some(paths)) => {
+                Default::default()
+            },
+            (None, None) => {
+                None
+            }
+        }
+    }
+}
+impl<T: Config> Parser<T> for URAuthParser {
+    
+    type URI = URI;
     type ChallengeValue = Vec<u8>;
 
-    fn base_uri(raw_uri: Vec<u8>) -> Result<URI, DispatchError> {
+    fn is_root_domain(raw_uri: Vec<u8>) -> Result<URI, DispatchError> {
         let maybe_root = sp_std::str::from_utf8(&raw_uri)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
         match ada_url::Url::parse(maybe_root, None) {
             Ok(url) => {
-                let mut root: &str = url.host();
+                let mut root = url.host();
                 let mut protocol: Option<&str> = None;
                 if url.scheme_type() != ada_url::SchemeType::Http && 
                     url.scheme_type() != ada_url::SchemeType::Https {
@@ -786,45 +831,98 @@ impl<T: Config> Parser<T> for URAuthParser {
             }
         }
     }
-    
-    fn parent_uris(_raw_url: &Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError> {
-        Ok(None)
-        // let input = sp_std::str::from_utf8(raw_url)
-        //     .map_err(|_| Error::<T>::ErrorOnParse)?;
-        // let base = <Self as Parser<T>>::base_uri(raw_url)?;
-        // if <Self as Parser<T>>::is_base_uri(raw_url)? {
-        //     return Ok(None)
-        // }
-        // match ada_url::Url::parse(input, None) {
-        //     Ok(url) => {
-        //         sp_std::if_std! { println!("URI => {:?}", url); }
-        //         let paths = url.pathname().split('/').collect::<Vec<&str>>();
-        //         sp_std::if_std! {
-        //             println!("{:?}", paths);
-        //         }
-        //         if let Some(l) = paths.get(1) {
-        //             //
-        //             if l.is_empty() {
-        //                 return Ok(None)
-        //             }
-        //         } else {
-        //             return Err(Error::<T>::OverMaxSize.into())
-        //         }
-        //         let mut parents: Vec<URI> = Vec::new();
-        //         let paths = url.pathname().split('/').collect::<Vec<&str>>();
-        //         sp_std::if_std! {
-        //             println!("{:?}", paths);
-        //         }
-        //         parents.push(base);
-        //         Ok(Some(parents))
-        //     },
-        //     Err(_) => { Ok(Default::default())}
-        // }
+
+    fn root_domain(raw_uri: Vec<u8>) -> Result<Self::URI, DispatchError> {
+        let maybe_root = sp_std::str::from_utf8(&raw_uri)
+            .map_err(|_| Error::<T>::ErrorConvertToString)?;
+        match ada_url::Url::parse(maybe_root, None) {
+            Ok(url) => {
+                let mut root = url.host();
+                let mut protocol: Option<&str> = None;
+                if url.scheme_type() != ada_url::SchemeType::Http && 
+                    url.scheme_type() != ada_url::SchemeType::Https {
+                    protocol = Some(url.protocol());
+                }
+
+                let domain = addr::parse_domain_name(root)
+                    .map_err(|e| {
+                        sp_std::if_std! { println!("{:?}", e) }
+                        Error::<T>::ErrorOnParse
+                    })?;
+                root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
+                if let Some(protocol) = protocol {
+                    let mut raw_root: Vec<u8> = Vec::new();
+                    raw_root.append(&mut protocol.as_bytes().to_vec());
+                    raw_root.append(&mut "//".as_bytes().to_vec());
+                    raw_root.append(&mut root.as_bytes().to_vec());
+                    return Ok(raw_root.try_into().map_err(|_| Error::<T>::OverMaxSize)?)
+                }
+                Ok(root
+                    .as_bytes()
+                    .to_vec()
+                    .try_into()
+                    .map_err(|_| Error::<T>::OverMaxSize)?
+                )
+            },
+            Err(_e) => { 
+                let mut root = maybe_root;
+                match addr::parse_domain_name(root) {
+                    Ok(domain) => {
+                        root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
+                    },
+                    Err(_e) => {
+                        root = root
+                            .split('/')
+                            .collect::<Vec<&str>>()
+                            .first()
+                            .ok_or(Error::<T>::ErrorOnParse)?;
+                    }
+                }
+                Ok(root
+                    .as_bytes()
+                    .to_vec()
+                    .try_into()
+                    .map_err(|_| Error::<T>::OverMaxSize)?
+                )
+            }
+        }
+    }
+
+    fn parent_uris(raw_url: Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError> {
+        let input = sp_std::str::from_utf8(&raw_url)
+            .map_err(|_| Error::<T>::ErrorOnParse)?;
+        // Return 'None' if it is base_uri 
+        if <Self as Parser<T>>::is_root_domain(raw_url.clone()).is_ok() { 
+            return Ok(None) 
+        }
+        match ada_url::Url::parse(input, None) {
+            Ok(url) => {
+                sp_std::if_std! { println!("{:?}", url.pathname())}
+                let domain = addr::parse_domain_name(url.hostname())
+                    .map_err(|e| {
+                        sp_std::if_std! { println!("{:?}", e) }
+                        Error::<T>::ErrorOnParse
+                    })?;
+                let base_domain = <Self as Parser<T>>::root_domain(raw_url.clone())?;
+                let base_domain_str = sp_std::str::from_utf8(&base_domain)
+                    .map_err(|_| Error::<T>::ErrorConvertToString)?; 
+                let mut sub_domains: Option<&str> = None;
+                if !Self::check_sub_domain(domain) {
+                    sub_domains = Some(domain.prefix().ok_or(Error::<T>::ErrorOnParse)?);
+                }
+                sp_std::if_std! { println!("{:?}", sub_domains)}
+                let mut paths: Option<&str> = None;
+                if url.pathname().len() != 1 {
+                    paths = Some(url.pathname());
+                }
+                Ok(Self::parent_uris(base_domain_str, sub_domains, paths))
+            },
+            Err(_) => { Ok(Default::default())}
+        }
     }
 }
 
 pub mod size {
-
     use super::*;
 
     /// Maximum number of `URAuthDoc` owners we expect in a single `MultiDID` value. Note this is not (yet)
