@@ -479,6 +479,10 @@ where
             data_source,
         }
     }
+    
+    pub fn is_owner(&self, who: &Account) -> bool {
+        self.multi_owner_did.is_owner(who)
+    }
 
     pub fn get_threshold(&self) -> DIDWeight {
         self.multi_owner_did.threshold
@@ -717,7 +721,7 @@ pub trait Parser<T: Config> {
 
     fn root_domain(raw_uri: Vec<u8>) -> Result<Self::URI, DispatchError>;
 
-    fn parent_uris(raw_url: Vec<u8>) -> Result<Option<Vec<Self::URI>>, DispatchError>;
+    fn check_owner(raw_url: Vec<u8>, owner: T::AccountId) -> Result<(), DispatchError>;
 
     fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
         Ok(Default::default())
@@ -726,15 +730,6 @@ pub trait Parser<T: Config> {
 
 pub struct URAuthParser<T>(PhantomData<T>);
 impl<T: Config> URAuthParser<T> {
-    /// Check if sub domain exists and if is 'www'.
-    fn check_sub_domain(domain: addr::domain::Name) -> bool {
-        if domain.prefix() != None 
-            && domain.prefix() != Some("www") 
-        {
-            return false
-        }
-        true
-    } 
 
     pub fn protocol_index_from_uri(base_domain: &str) -> Option<usize> {
         match base_domain.find(':') {
@@ -748,7 +743,7 @@ impl<T: Config> URAuthParser<T> {
         }
     }
 
-    pub fn parent_uris_2(uri: &str) -> Result<Option<Vec<URI>>, DispatchError> {
+    fn try_parse_parent_uris(uri: &str, base: &str) -> Result<Vec<URI>, DispatchError> {
         let mut uris: Vec<URI> = Vec::new();
         let mut parent_uri = uri.clone();
         while let Some(i) = parent_uri.rfind('/') {
@@ -757,45 +752,28 @@ impl<T: Config> URAuthParser<T> {
             let bounded_uri: URI = parent_uri.as_bytes().to_vec().try_into().map_err(|_| Error::<T>::OverMaxSize)?; 
             uris.push(bounded_uri);
         }
-        Ok(Some(uris))
+        while let Some(i) = parent_uri.find('.') {
+            if parent_uri == base {
+                break;
+            }
+            parent_uri = &parent_uri[i+1..];
+            sp_std::if_std! { println!("{:?}", parent_uri) }
+            let bounded_uri: URI = parent_uri.as_bytes().to_vec().try_into().map_err(|_| Error::<T>::OverMaxSize)?; 
+            uris.push(bounded_uri);
+        }
+        Ok(uris)
     }
 
-    fn parent_uris(base_domain: &str, sub_domains: Option<&str>, paths: Option<&str>) -> Option<Vec<URI>> {
-        let mut parent_uris: Vec<URI> = Vec::new();
-        match (sub_domains, paths) {
-            (Some(sub), Some(paths)) => {
-                let sub_domains = sub.split('.').collect::<Vec<&str>>();
-                let paths = paths.split('/').collect::<Vec<&str>>();
-                sp_std::if_std! { println!("{:?}", sub_domains); }
-                sp_std::if_std! { println!("{:?}", paths); }
-                Default::default()
-            },
-            (Some(sub), None) => {
-                let sub_domains = sub.split('.').collect::<Vec<&str>>();
-                sp_std::if_std! { println!("{:?}", sub_domains); }
-                Default::default()
-            },
-            (None, Some(paths)) => {
-                let mut paths = paths.split('/').collect::<Vec<&str>>();
-                paths.retain(|p| !p.is_empty());
-                let l = paths.len();
-                sp_std::if_std! { println!("{:?}", paths); }
-                // e.g example.com/path1
-                if l == 1 {
-                    return None;
+    pub fn try_check_owner(uri: &str, base: &str, maybe_owner: T::AccountId) -> Result<(), DispatchError> {
+        let uris = <URAuthParser<T>>::try_parse_parent_uris(uri, base)?;
+        for uri in uris {
+            if let Some(urauth_doc) = URAuthTree::<T>::get(&uri) {
+                if urauth_doc.is_owner(&maybe_owner) {
+                    return Ok(())
                 }
-                let mut raw_uri: Vec<u8> = Vec::new();
-                for i in 0..l-1 {
-                    if let Some(path) = paths.get(i) {
-
-                    }
-                }
-                Default::default()
-            },
-            (None, None) => {
-                None
             }
         }
+        Err(Error::<T>::NotURAuthDocOwner.into())
     }
 }
 impl<T: Config> Parser<T> for URAuthParser<T> {
@@ -920,35 +898,18 @@ impl<T: Config> Parser<T> for URAuthParser<T> {
         }
     }
 
-    fn parent_uris(raw_url: Vec<u8>) -> Result<Option<Vec<URI>>, DispatchError> {
+    fn check_owner(raw_url: Vec<u8>, who: T::AccountId) -> Result<(), DispatchError> {
         let input = sp_std::str::from_utf8(&raw_url)
             .map_err(|_| Error::<T>::ErrorOnParse)?;
         // Return 'None' if it is base_uri 
         if <Self as Parser<T>>::is_root_domain(raw_url.clone()).is_ok() { 
-            return Ok(None) 
+            return Ok(()) 
         }
-        match ada_url::Url::parse(input, None) {
-            Ok(url) => {
-                let domain = addr::parse_domain_name(url.hostname())
-                    .map_err(|e| {
-                        sp_std::if_std! { println!("{:?}", e) }
-                        Error::<T>::ErrorOnParse
-                    })?;
-                let base_domain = <Self as Parser<T>>::root_domain(raw_url.clone())?;
-                let base_domain_str = sp_std::str::from_utf8(&base_domain)
-                    .map_err(|_| Error::<T>::ErrorConvertToString)?; 
-                let mut sub_domains: Option<&str> = None;
-                if !Self::check_sub_domain(domain) {
-                    sub_domains = Some(domain.prefix().ok_or(Error::<T>::ErrorOnParse)?);
-                }
-                let mut paths: Option<&str> = None;
-                if url.pathname().len() != 1 {
-                    paths = Some(url.pathname());
-                }
-                Ok(Self::parent_uris(base_domain_str, sub_domains, paths))
-            },
-            Err(_) => { Ok(Default::default()) }
-        }
+        let base_domain = <Self as Parser<T>>::root_domain(raw_url.clone())?;
+        let base_domain_str = sp_std::str::from_utf8(&base_domain)
+            .map_err(|_| Error::<T>::ErrorConvertToString)?; 
+
+        Self::try_check_owner(input ,base_domain_str, who)
     }
 }
 

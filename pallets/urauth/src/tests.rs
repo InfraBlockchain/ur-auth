@@ -726,12 +726,6 @@ fn parser_works() {
     is_root_domain("ftp://instagram.com", "ftp://instagram.com");
     is_root_domain("ftp://sub2.sub1.www.instagram.com", "ftp://instagram.com");
     is_root_domain("smtp://sub2.sub1.www.instagram.com", "smtp://instagram.com");
-    
-    // assert!(<URAuthParser<Test> as Parser<Test>>::parent_uris("https://instagram.com".as_bytes().to_vec()).unwrap().is_none());
-    // assert!(<URAuthParser<Test> as Parser<Test>>::parent_uris("https://sub1.instagram.com".as_bytes().to_vec()).unwrap().is_none());
-    // assert!(<URAuthParser<Test> as Parser<Test>>::parent_uris("https://sub1.instagram.com/user".as_bytes().to_vec()).unwrap().is_none());
-    // assert!(<URAuthParser<Test> as Parser<Test>>::parent_uris_2("https://instagram.com/user/1".as_bytes().to_vec()).unwrap().is_none());
-    println!("{:?}", URAuthParser::<Test>::parent_uris_2("instagram.com/user/1").unwrap());
 }
 
 fn is_root_domain(url: &str, expect: &str) {
@@ -759,33 +753,11 @@ fn protocol_index_works() {
 }
 
 #[test]
-fn parser_works2(){
-    println!("{:?}", parse_paths("sub2.sub1.instagram.com/user/1"));
-}
-
-fn parse_paths(base_uri: &str) -> Vec<&str> {
-    let mut parent_uris = Vec::new();
-
-    let mut uri = base_uri.clone();
-    while uri.len() > 0 {
-        // Remove the last path segment.
-        match uri.rfind('/') {
-            Some(i) => {
-                uri = &uri[0..i]
-            },
-            None => {
-                match uri.rfind('.') {
-                    Some(d) => {
-                        uri = &uri[d..uri.len()];
-                    }, 
-                    None => { break }
-                }
-            }
-        }
-        // Add the parent URI to the vector.
-        parent_uris.push(uri);
-    }
-
-    return parent_uris;
+fn parent_uris_works() {
+    new_test_ext().execute_with(|| {
+        assert!(URAuthParser::<Test>::try_check_owner("instagram.com/user/1", "instagram.com", Alice.to_account_id()).is_err());
+        assert!(URAuthParser::<Test>::try_check_owner("sub2.sub1.instagram.com/user/1", "instagram.com", Alice.to_account_id()).is_err());
+        assert!(URAuthParser::<Test>::try_check_owner("instagram.com", "instagram.com", Alice.to_account_id()).is_err());
+    })
 }
 
