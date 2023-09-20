@@ -724,8 +724,8 @@ pub trait Parser<T: Config> {
     }
 }
 
-pub struct URAuthParser;
-impl URAuthParser {
+pub struct URAuthParser<T>(PhantomData<T>);
+impl<T: Config> URAuthParser<T> {
     /// Check if sub domain exists and if is 'www'.
     fn check_sub_domain(domain: addr::domain::Name) -> bool {
         if domain.prefix() != None 
@@ -748,16 +748,48 @@ impl URAuthParser {
         }
     }
 
+    pub fn parent_uris_2(uri: &str) -> Result<Option<Vec<URI>>, DispatchError> {
+        let mut uris: Vec<URI> = Vec::new();
+        let mut parent_uri = uri.clone();
+        while let Some(i) = parent_uri.rfind('/') {
+            parent_uri = &uri[0..i];
+            sp_std::if_std! { println!("{:?}", parent_uri) }
+            let bounded_uri: URI = parent_uri.as_bytes().to_vec().try_into().map_err(|_| Error::<T>::OverMaxSize)?; 
+            uris.push(bounded_uri);
+        }
+        Ok(Some(uris))
+    }
+
     fn parent_uris(base_domain: &str, sub_domains: Option<&str>, paths: Option<&str>) -> Option<Vec<URI>> {
         let mut parent_uris: Vec<URI> = Vec::new();
         match (sub_domains, paths) {
             (Some(sub), Some(paths)) => {
+                let sub_domains = sub.split('.').collect::<Vec<&str>>();
+                let paths = paths.split('/').collect::<Vec<&str>>();
+                sp_std::if_std! { println!("{:?}", sub_domains); }
+                sp_std::if_std! { println!("{:?}", paths); }
                 Default::default()
             },
             (Some(sub), None) => {
+                let sub_domains = sub.split('.').collect::<Vec<&str>>();
+                sp_std::if_std! { println!("{:?}", sub_domains); }
                 Default::default()
             },
             (None, Some(paths)) => {
+                let mut paths = paths.split('/').collect::<Vec<&str>>();
+                paths.retain(|p| !p.is_empty());
+                let l = paths.len();
+                sp_std::if_std! { println!("{:?}", paths); }
+                // e.g example.com/path1
+                if l == 1 {
+                    return None;
+                }
+                let mut raw_uri: Vec<u8> = Vec::new();
+                for i in 0..l-1 {
+                    if let Some(path) = paths.get(i) {
+
+                    }
+                }
                 Default::default()
             },
             (None, None) => {
@@ -766,7 +798,7 @@ impl URAuthParser {
         }
     }
 }
-impl<T: Config> Parser<T> for URAuthParser {
+impl<T: Config> Parser<T> for URAuthParser<T> {
     
     type URI = URI;
     type ChallengeValue = Vec<u8>;
@@ -897,7 +929,6 @@ impl<T: Config> Parser<T> for URAuthParser {
         }
         match ada_url::Url::parse(input, None) {
             Ok(url) => {
-                sp_std::if_std! { println!("{:?}", url.pathname())}
                 let domain = addr::parse_domain_name(url.hostname())
                     .map_err(|e| {
                         sp_std::if_std! { println!("{:?}", e) }
@@ -910,14 +941,13 @@ impl<T: Config> Parser<T> for URAuthParser {
                 if !Self::check_sub_domain(domain) {
                     sub_domains = Some(domain.prefix().ok_or(Error::<T>::ErrorOnParse)?);
                 }
-                sp_std::if_std! { println!("{:?}", sub_domains)}
                 let mut paths: Option<&str> = None;
                 if url.pathname().len() != 1 {
                     paths = Some(url.pathname());
                 }
                 Ok(Self::parent_uris(base_domain_str, sub_domains, paths))
             },
-            Err(_) => { Ok(Default::default())}
+            Err(_) => { Ok(Default::default()) }
         }
     }
 }

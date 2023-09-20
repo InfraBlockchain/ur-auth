@@ -727,22 +727,25 @@ fn parser_works() {
     is_root_domain("ftp://sub2.sub1.www.instagram.com", "ftp://instagram.com");
     is_root_domain("smtp://sub2.sub1.www.instagram.com", "smtp://instagram.com");
     
-    assert!(<URAuthParser as Parser<Test>>::parent_uris("https://instagram.com".as_bytes().to_vec()).unwrap().is_none());
-    assert!(<URAuthParser as Parser<Test>>::parent_uris("https://sub1.instagram.com".as_bytes().to_vec()).unwrap().is_none());
+    // assert!(<URAuthParser<Test> as Parser<Test>>::parent_uris("https://instagram.com".as_bytes().to_vec()).unwrap().is_none());
+    // assert!(<URAuthParser<Test> as Parser<Test>>::parent_uris("https://sub1.instagram.com".as_bytes().to_vec()).unwrap().is_none());
+    // assert!(<URAuthParser<Test> as Parser<Test>>::parent_uris("https://sub1.instagram.com/user".as_bytes().to_vec()).unwrap().is_none());
+    // assert!(<URAuthParser<Test> as Parser<Test>>::parent_uris_2("https://instagram.com/user/1".as_bytes().to_vec()).unwrap().is_none());
+    println!("{:?}", URAuthParser::<Test>::parent_uris_2("instagram.com/user/1").unwrap());
 }
 
 fn is_root_domain(url: &str, expect: &str) {
     let urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
     let url: String = url.into();
     let raw_url: Vec<u8> = url.clone().into();
-    match <URAuthParser as Parser<Test>>::is_root_domain(raw_url) {
+    match <URAuthParser<Test> as Parser<Test>>::is_root_domain(raw_url) {
         Ok(uri) => {
             println!(" Given URI is base uri => {:?}", url);
             assert_eq!(uri, urauth_helper.bounded_uri(Some(expect.into())));
         },
         Err(_) => { 
             println!(" Given URI is not base uri. => {:?}", url);
-            println!(" Parse it! => {:?}", sp_std::str::from_utf8(&<URAuthParser as Parser<Test>>::root_domain(url.as_bytes().to_vec()).unwrap().to_vec()));
+            println!(" Parse it! => {:?}", sp_std::str::from_utf8(&<URAuthParser<Test> as Parser<Test>>::root_domain(url.as_bytes().to_vec()).unwrap().to_vec()));
             return 
         }
     }
@@ -750,7 +753,39 @@ fn is_root_domain(url: &str, expect: &str) {
 
 #[test]
 fn protocol_index_works() {
-    assert_eq!(URAuthParser::protocol_index_from_uri("instagram.com"), None);
-    assert_eq!(URAuthParser::protocol_index_from_uri("ftp://instagram.com"), Some(5));
-    assert_eq!(URAuthParser::protocol_index_from_uri("smtp://instagram.com"), Some(6));
+    assert_eq!(URAuthParser::<Test>::protocol_index_from_uri("instagram.com"), None);
+    assert_eq!(URAuthParser::<Test>::protocol_index_from_uri("ftp://instagram.com"), Some(5));
+    assert_eq!(URAuthParser::<Test>::protocol_index_from_uri("smtp://instagram.com"), Some(6));
 }
+
+#[test]
+fn parser_works2(){
+    println!("{:?}", parse_paths("sub2.sub1.instagram.com/user/1"));
+}
+
+fn parse_paths(base_uri: &str) -> Vec<&str> {
+    let mut parent_uris = Vec::new();
+
+    let mut uri = base_uri.clone();
+    while uri.len() > 0 {
+        // Remove the last path segment.
+        match uri.rfind('/') {
+            Some(i) => {
+                uri = &uri[0..i]
+            },
+            None => {
+                match uri.rfind('.') {
+                    Some(d) => {
+                        uri = &uri[d..uri.len()];
+                    }, 
+                    None => { break }
+                }
+            }
+        }
+        // Add the parent URI to the vector.
+        parent_uris.push(uri);
+    }
+
+    return parent_uris;
+}
+

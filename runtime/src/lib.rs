@@ -537,7 +537,7 @@ parameter_types! {
 
 impl pallet_urauth::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
-    type URAuthParser = pallet_urauth::URAuthParser;
+    type URAuthParser = pallet_urauth::URAuthParser<Self>;
     type UnixTime = Timestamp;
     type MaxOracleMembers = MaxOracleMembers;
     type MaxURIByOracle = MaxURIByOracle;
