@@ -273,7 +273,7 @@ pub mod pallet {
         BadSigner,
         /// General error on challenge value(e.g parsing json-string, different challenge value).
         BadChallengeValue,
-        /// Error on verifying challenge before requesting its ownership.
+        /// General Error on requesting ownership(e.g URAuth Request, Challenge Value)
         BadRequest,
         /// Size is over limit of `MAX_*`
         OverMaxSize,
@@ -301,6 +301,10 @@ pub mod pallet {
         NotURIByOracle,
         /// Given URI is not base URI
         NotBaseURI,
+        /// Given URI is not valid
+        NotValidURI,
+        /// Given URI should be claimed by Oracle
+        NotClaimByOracle,
         /// General error on proof where it is required but it is not given.
         ProofMissing,
         /// Error when challenge value is not stored for requested URI.
@@ -350,10 +354,11 @@ pub mod pallet {
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
+            ensure!(claim_type.should_claim_by_oracle(), Error::<T>::BadRequest);
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
+            let _ = Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
 
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
@@ -488,7 +493,8 @@ pub mod pallet {
         //
         // Logic:
         // 1. Verify signature
-        // 2. Once it is verified, create new URAuthDoc based on `claim_type`
+        // 2. Verify signer is one of the parent owners
+        // 3. Once it is verified, create new URAuthDoc based on `claim_type`
         #[pallet::call_index(3)]
         #[pallet::weight(1_000)]
         pub fn claim_ownership(
@@ -500,12 +506,14 @@ pub mod pallet {
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            let bounded_uri: URI = uri.clone().try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
+            let signer_acc = Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
+            T::URAuthParser::check_parent_owner(uri, signer_acc)?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
+            // ToDo: Check that raw_url is not base
             let urauth_doc = match claim_type.clone() {
                 ClaimType::Dataset {
                     data_source,
@@ -694,7 +702,7 @@ impl<T: Config> Pallet<T> {
         owner_did: &OwnerDID,
         signature: &MultiSignature,
         signer: MultiSigner,
-    ) -> Result<(), DispatchError> {
+    ) -> Result<T::AccountId, DispatchError> {
         let urauth_signed_payload = URAuthSignedPayload::<T::AccountId>::Request {
             uri: uri.clone(),
             owner_did: owner_did.clone(),
@@ -714,7 +722,7 @@ impl<T: Config> Pallet<T> {
             return Err(Error::<T>::BadProof.into());
         }
 
-        Ok(())
+        Ok(signer_account_id)
     }
 
     /// Handle the result of _challenge value_ verification based on `VerificationSubmissionResult`

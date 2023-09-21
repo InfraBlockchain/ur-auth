@@ -1,5 +1,5 @@
 pub use crate::{self as pallet_urauth, *};
-use frame_support::{parameter_types, traits::Everything};
+use frame_support::{parameter_types, traits::{Everything, EitherOfDiverse}};
 use frame_system::EnsureRoot;
 use sp_core::{sr25519::Signature, H256};
 use sp_runtime::{

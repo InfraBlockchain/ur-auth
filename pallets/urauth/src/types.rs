@@ -29,6 +29,13 @@ pub enum ClaimType {
     },
 }
 
+impl ClaimType {
+    pub fn should_claim_by_oracle(&self) -> bool {
+        matches!(self, ClaimType::WebServiceAccount) || 
+            matches!(self, ClaimType::WebsiteDomain)
+    }
+}
+
 impl MaxEncodedLen for ClaimType {
     fn max_encoded_len() -> usize {
         URI::max_encoded_len() + URI::max_encoded_len()
@@ -721,7 +728,7 @@ pub trait Parser<T: Config> {
 
     fn root_domain(raw_uri: Vec<u8>) -> Result<Self::URI, DispatchError>;
 
-    fn check_owner(raw_url: Vec<u8>, owner: T::AccountId) -> Result<(), DispatchError>;
+    fn check_parent_owner(raw_url: Vec<u8>, owner: T::AccountId) -> Result<(), DispatchError>;
 
     fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
         Ok(Default::default())
@@ -731,18 +738,16 @@ pub trait Parser<T: Config> {
 pub struct URAuthParser<T>(PhantomData<T>);
 impl<T: Config> URAuthParser<T> {
 
-    pub fn protocol_index_from_uri(base_domain: &str) -> Option<usize> {
-        match base_domain.find(':') {
-            Some(i) => {
-                // ":"+ "//"
-                Some(i + 2)
-            },
-            None => {
-                None
-            }
+    pub fn uri_index_without_protocol(uri: &str) -> usize {
+        if let Some(i) = uri.find(':') {
+            return i + 3
         }
+        0
     }
 
+    /// Parse the given uri and will return the list of the parsed `URI`
+    /// 1. Try parse the `path` from uri(e.g /path1/path2). 
+    /// 2. Try parse the `sub_domain` from uri(e.g sub2.sub1)
     fn try_parse_parent_uris(uri: &str, base: &str) -> Result<Vec<URI>, DispatchError> {
         let mut uris: Vec<URI> = Vec::new();
         let mut parent_uri = uri.clone();
@@ -764,7 +769,20 @@ impl<T: Config> URAuthParser<T> {
         Ok(uris)
     }
 
-    pub fn try_check_owner(uri: &str, base: &str, maybe_owner: T::AccountId) -> Result<(), DispatchError> {
+    /// Check owner of given 'uri'. Parse the given uri 
+    /// and check whether given owner is one of the owner of the parent_uris
+    /// 
+    /// ## Example 
+    /// 
+    /// - uri: "sub2.sub1.example.com/path1"
+    /// 
+    /// - base: "example.com"
+    /// 
+    /// - parent_uri: ["(sub2.sub1.example.com, owner1)", "(sub1.example.com, owner2)", "(example.com, owner3)"]
+    /// 
+    /// Check `maybe_owner == owner1?` -> `maybe_owner == owner2?` -> `maybe_owner == owner3?`.
+    /// If not, return `Error::<T>::NotURAuthDocOwner`
+    pub fn try_check_parent_owner(uri: &str, base: &str, maybe_owner: T::AccountId) -> Result<(), DispatchError> {
         let uris = <URAuthParser<T>>::try_parse_parent_uris(uri, base)?;
         for uri in uris {
             if let Some(urauth_doc) = URAuthTree::<T>::get(&uri) {
@@ -898,18 +916,16 @@ impl<T: Config> Parser<T> for URAuthParser<T> {
         }
     }
 
-    fn check_owner(raw_url: Vec<u8>, who: T::AccountId) -> Result<(), DispatchError> {
+    // ToDo: Check valid uri
+    // ToDO: Given uri assumes it has no protocol
+    fn check_parent_owner(raw_url: Vec<u8>, maybe_owner: T::AccountId) -> Result<(), DispatchError> {
         let input = sp_std::str::from_utf8(&raw_url)
             .map_err(|_| Error::<T>::ErrorOnParse)?;
-        // Return 'None' if it is base_uri 
-        if <Self as Parser<T>>::is_root_domain(raw_url.clone()).is_ok() { 
-            return Ok(()) 
-        }
         let base_domain = <Self as Parser<T>>::root_domain(raw_url.clone())?;
         let base_domain_str = sp_std::str::from_utf8(&base_domain)
             .map_err(|_| Error::<T>::ErrorConvertToString)?; 
 
-        Self::try_check_owner(input ,base_domain_str, who)
+        Self::try_check_parent_owner(input, base_domain_str, maybe_owner)
     }
 }
 

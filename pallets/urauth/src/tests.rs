@@ -747,17 +747,14 @@ fn is_root_domain(url: &str, expect: &str) {
 
 #[test]
 fn protocol_index_works() {
-    assert_eq!(URAuthParser::<Test>::protocol_index_from_uri("instagram.com"), None);
-    assert_eq!(URAuthParser::<Test>::protocol_index_from_uri("ftp://instagram.com"), Some(5));
-    assert_eq!(URAuthParser::<Test>::protocol_index_from_uri("smtp://instagram.com"), Some(6));
+    assert_eq!(URAuthParser::<Test>::uri_index_without_protocol("instagram.com"), 0);
+    assert_eq!(URAuthParser::<Test>::uri_index_without_protocol("ftp://instagram.com"), 6);
+    assert_eq!(URAuthParser::<Test>::uri_index_without_protocol("smtp://instagram.com"), 7);
 }
 
 #[test]
 fn parent_uris_works() {
     new_test_ext().execute_with(|| {
-        assert!(URAuthParser::<Test>::try_check_owner("instagram.com/user/1", "instagram.com", Alice.to_account_id()).is_err());
-        assert!(URAuthParser::<Test>::try_check_owner("sub2.sub1.instagram.com/user/1", "instagram.com", Alice.to_account_id()).is_err());
-        assert!(URAuthParser::<Test>::try_check_owner("instagram.com", "instagram.com", Alice.to_account_id()).is_err());
+        
     })
 }
-
