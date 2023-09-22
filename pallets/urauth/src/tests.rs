@@ -152,7 +152,7 @@ fn urauth_request_register_ownership_works() {
             "www.website1.com".as_bytes().to_vec(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain,
+            ClaimType::WebsiteDomain { is_root: true },
             signer.clone(),
             signature.clone()
         ));
@@ -175,7 +175,7 @@ fn urauth_request_register_ownership_works() {
                 uri.clone(),
                 urauth_helper.generate_did(BOB_SS58).as_bytes().to_vec(),
                 Some(urauth_helper.challenge_value()),
-                ClaimType::WebsiteDomain,
+                ClaimType::WebsiteDomain { is_root: true },
                 signer.clone(),
                 signature.clone()
             ),
@@ -197,7 +197,7 @@ fn urauth_request_register_ownership_works() {
                 uri.clone(),
                 owner_did.clone(),
                 Some(urauth_helper.challenge_value()),
-                ClaimType::WebsiteDomain,
+                ClaimType::WebsiteDomain { is_root: true },
                 signer.clone(),
                 signature2
             ),
@@ -222,7 +222,7 @@ fn urauth_request_register_ownership_works() {
                 uri.clone(),
                 owner_did,
                 Some(urauth_helper.challenge_value()),
-                ClaimType::WebsiteDomain,
+                ClaimType::WebsiteDomain { is_root: true },
                 signer.clone(),
                 signature3
             ),
@@ -263,7 +263,7 @@ fn verify_challenge_works() {
             uri.clone(),
             owner_did,
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain,
+            ClaimType::WebsiteDomain { is_root: true },
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -317,7 +317,7 @@ fn update_urauth_doc_works() {
             uri.clone(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain,
+            ClaimType::WebsiteDomain { is_root: true },
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -575,7 +575,7 @@ fn verify_challenge_with_multiple_oracle_members() {
             uri.clone(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain,
+            ClaimType::WebsiteDomain { is_root: true },
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -732,14 +732,13 @@ fn is_root_domain(url: &str, expect: &str) {
     let urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
     let url: String = url.into();
     let raw_url: Vec<u8> = url.clone().into();
-    match <URAuthParser<Test> as Parser<Test>>::is_root_domain(raw_url) {
-        Ok(uri) => {
+    match <URAuthParser<Test> as Parser<Test>>::is_root(&raw_url) {
+        Ok(_) => {
             println!(" Given URI is base uri => {:?}", url);
-            assert_eq!(uri, urauth_helper.bounded_uri(Some(expect.into())));
         },
         Err(_) => { 
             println!(" Given URI is not base uri. => {:?}", url);
-            println!(" Parse it! => {:?}", sp_std::str::from_utf8(&<URAuthParser<Test> as Parser<Test>>::root_domain(url.as_bytes().to_vec()).unwrap().to_vec()));
+            println!(" Parse it! => {:?}", sp_std::str::from_utf8(&<URAuthParser<Test> as Parser<Test>>::root(&url.as_bytes().to_vec()).unwrap().to_vec()));
             return 
         }
     }
@@ -747,14 +746,15 @@ fn is_root_domain(url: &str, expect: &str) {
 
 #[test]
 fn protocol_index_works() {
-    assert_eq!(URAuthParser::<Test>::uri_index_without_protocol("instagram.com"), 0);
-    assert_eq!(URAuthParser::<Test>::uri_index_without_protocol("ftp://instagram.com"), 6);
-    assert_eq!(URAuthParser::<Test>::uri_index_without_protocol("smtp://instagram.com"), 7);
+    assert_eq!(URAuthParser::<Test>::has_protocol("https://instagram.com").unwrap(), 8);
+    assert_eq!(URAuthParser::<Test>::has_protocol("urauth://cid").unwrap(), 9);
+    assert_eq!(URAuthParser::<Test>::has_protocol("smtp://instagram.com").unwrap(), 7);
 }
 
 #[test]
-fn parent_uris_works() {
-    new_test_ext().execute_with(|| {
-        
-    })
+fn deconstruct_works() {
+    let uri_part = URAuthParser::<Test>::deconstruct_uri(&"https://sub2.sub1.instagram.com/user1/feed".as_bytes().to_vec()).unwrap();
+    println!("{}", uri_part);
+    println!("{:?}", std::str::from_utf8(&uri_part.root()));
+    println!("{:?}", std::str::from_utf8(&uri_part.full_uri()));
 }

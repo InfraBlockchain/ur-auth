@@ -17,23 +17,86 @@ pub type ApprovalCount = u32;
 pub type Threshold = u32;
 pub type URAuthDocCount = u128;
 
+pub type ClaimTypeFor<T> = <<T as Config>::URAuthParser as Parser<T>>::ClaimType;
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub struct URIPart {
+    pub protocol: Vec<u8>,
+    pub sub_domain: Option<Vec<u8>>,
+    pub base_domain: Vec<u8>,
+    pub path: Option<Vec<u8>>,
+}
+
+impl URIPart {
+    pub fn new(
+        protocol: Vec<u8>, 
+        sub_domain: Option<Vec<u8>>, 
+        base_domain: Vec<u8>, 
+        path: Option<Vec<u8>>,
+    ) -> Self {
+        Self {
+            protocol,
+            sub_domain,
+            base_domain,
+            path,
+        }
+    }
+
+    pub fn full_uri(&self) -> Vec<u8> {
+        let mut full = Vec::new();
+        let mut protocol = self.protocol.clone();
+        let mut base_domain = self.base_domain.clone();
+        let mut sub_domain = self.sub_domain.clone().map_or("".as_bytes().to_vec(), |v| v);
+        let mut path = self.path.clone().map_or("".as_bytes().to_vec(), |v| v);
+        full.append(&mut protocol);
+        full.append(&mut sub_domain);
+        full.append(&mut base_domain);
+        full.append(&mut path);
+        full
+    }
+
+    pub fn root(&self) -> Vec<u8> {
+        let mut root: Vec<u8> = Vec::new();
+        if self.protocol != "http://".as_bytes().to_vec() &&
+            self.protocol != "https://".as_bytes().to_vec() {
+            root.append(&mut self.protocol.clone());
+        }
+        root.append(&mut self.base_domain.clone());
+        root
+    }
+
+    pub fn is_root(&self) -> bool {
+        self.sub_domain == None && self.path == None 
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::fmt::Display for URIPart {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let sub_domain = self.sub_domain.clone().map_or(Vec::new(), |s| s);
+        let path = self.path.clone().map_or(Vec::new(), |s| s);
+        write!(f, 
+            "Protocol => {:?}, 
+            Sub => {:?}, 
+            Base => {:?}, 
+            Path => {:?}", 
+            std::str::from_utf8(&self.protocol).unwrap(),
+            std::str::from_utf8(&sub_domain).unwrap(),
+            std::str::from_utf8(&self.base_domain).unwrap(),
+            std::str::from_utf8(&path).unwrap(),
+        )
+    }
+}
+
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum ClaimType {
-    WebsiteDomain,
-    WebServiceAccount,
+    WebsiteDomain { is_root: bool },
+    WebServiceAccount { is_root: bool, is_oracle: bool },
     File,
     Dataset {
         data_source: Option<Vec<u8>>,
         name: Vec<u8>,
         description: Vec<u8>,
     },
-}
-
-impl ClaimType {
-    pub fn should_claim_by_oracle(&self) -> bool {
-        matches!(self, ClaimType::WebServiceAccount) || 
-            matches!(self, ClaimType::WebsiteDomain)
-    }
 }
 
 impl MaxEncodedLen for ClaimType {
@@ -722,13 +785,16 @@ impl sp_runtime::traits::Printable for UpdateDocStatusError {
 pub trait Parser<T: Config> {
 
     type URI; 
+    type ClaimType;
     type ChallengeValue: Default;
 
-    fn is_root_domain(raw_uri: Vec<u8>) -> Result<Self::URI, DispatchError>;
+    fn is_valid_claim(raw_uri: &Vec<u8>, claim_type: Self::ClaimType) -> Result<(), DispatchError>;
 
-    fn root_domain(raw_uri: Vec<u8>) -> Result<Self::URI, DispatchError>;
+    fn is_root(raw_uri: &Vec<u8>) -> DispatchResult;
 
-    fn check_parent_owner(raw_url: Vec<u8>, owner: T::AccountId) -> Result<(), DispatchError>;
+    fn root(raw_uri: &Vec<u8>) -> Result<Self::URI, DispatchError>;
+
+    fn check_parent_owner(raw_uri: &Vec<u8>, owner: T::AccountId) -> Result<(), DispatchError>;
 
     fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
         Ok(Default::default())
@@ -738,17 +804,57 @@ pub trait Parser<T: Config> {
 pub struct URAuthParser<T>(PhantomData<T>);
 impl<T: Config> URAuthParser<T> {
 
-    pub fn uri_index_without_protocol(uri: &str) -> usize {
-        if let Some(i) = uri.find(':') {
-            return i + 3
+    pub fn deconstruct_uri(raw_uri: &Vec<u8>) -> Result<URIPart, DispatchError> {
+        let maybe_root = sp_std::str::from_utf8(&raw_uri)
+            .map_err(|_| Error::<T>::ErrorConvertToString)?;
+        let mut sub_domain: Option<Vec<u8>> = None;
+        let mut path: Option<Vec<u8>> = None;
+        let url = ada_url::Url::parse(maybe_root, None).map_err(|_| Error::<T>::ErrorOnParse)?;
+        if url.has_port() {
+            return Err(Error::<T>::NotValidURI.into());
         }
-        0
+        let mut protocol = url.protocol().as_bytes().to_vec();
+        protocol.append(&mut "//".as_bytes().to_vec());
+        // Check path from `url`. Return `Err` if any
+        if url.pathname().len() != 1 {
+            path = Some(url.pathname().as_bytes().to_vec());
+        }
+
+        let domain = addr::parse_domain_name(url.host())
+            .map_err(|e| {
+                sp_std::if_std! { println!("{:?}", e) }
+                Error::<T>::ErrorOnParse
+            })?;
+        if domain.prefix() != None {
+            sub_domain = domain.prefix().map(|s| { 
+                let mut bytes = s.as_bytes().to_vec();
+                bytes.append(&mut ".".as_bytes().to_vec()); 
+                bytes
+            });
+        }
+        let base_domain = domain.root().ok_or(Error::<T>::ErrorOnParse)?.as_bytes().to_vec();
+
+        Ok(URIPart::new(protocol, sub_domain, base_domain, path))
+    }
+
+    /// Returns index after 'protocol'. If protocol is 'http' or 'https' 
+    pub fn has_protocol(uri: &str) -> Result<usize, DispatchError> {
+        ensure!(ada_url::Url::can_parse(uri, None), Error::<T>::ErrorOnParse);
+        let index = uri.find(':').ok_or(Error::<T>::ProtocolMissing)?;
+        Ok(index+ 3)
     }
 
     /// Parse the given uri and will return the list of the parsed `URI`
     /// 1. Try parse the `path` from uri(e.g /path1/path2). 
     /// 2. Try parse the `sub_domain` from uri(e.g sub2.sub1)
-    fn try_parse_parent_uris(uri: &str, base: &str) -> Result<Vec<URI>, DispatchError> {
+    fn try_parse_parent_uris(raw_uri: &Vec<u8>) -> Result<Vec<URI>, DispatchError> {
+        
+        let uri_part = Self::deconstruct_uri(raw_uri)?;
+        let base = sp_std::str::from_utf8(&uri_part.base_domain)
+            .map_err(|_| Error::<T>::ErrorConvertToString)?;
+        let full_uri = uri_part.full_uri();
+        let uri = sp_std::str::from_utf8(&full_uri)
+            .map_err(|_| Error::<T>::ErrorConvertToString)?;
         let mut uris: Vec<URI> = Vec::new();
         let mut parent_uri = uri.clone();
         while let Some(i) = parent_uri.rfind('/') {
@@ -782,8 +888,8 @@ impl<T: Config> URAuthParser<T> {
     /// 
     /// Check `maybe_owner == owner1?` -> `maybe_owner == owner2?` -> `maybe_owner == owner3?`.
     /// If not, return `Error::<T>::NotURAuthDocOwner`
-    pub fn try_check_parent_owner(uri: &str, base: &str, maybe_owner: T::AccountId) -> Result<(), DispatchError> {
-        let uris = <URAuthParser<T>>::try_parse_parent_uris(uri, base)?;
+    pub fn try_check_parent_owner(raw_uri: &Vec<u8>, maybe_owner: T::AccountId) -> Result<(), DispatchError> {
+        let uris = Self::try_parse_parent_uris(raw_uri)?;
         for uri in uris {
             if let Some(urauth_doc) = URAuthTree::<T>::get(&uri) {
                 if urauth_doc.is_owner(&maybe_owner) {
@@ -797,135 +903,65 @@ impl<T: Config> URAuthParser<T> {
 impl<T: Config> Parser<T> for URAuthParser<T> {
     
     type URI = URI;
+    type ClaimType = ClaimType;
     type ChallengeValue = Vec<u8>;
 
-    fn is_root_domain(raw_uri: Vec<u8>) -> Result<URI, DispatchError> {
-        let maybe_root = sp_std::str::from_utf8(&raw_uri)
-            .map_err(|_| Error::<T>::ErrorConvertToString)?;
-        match ada_url::Url::parse(maybe_root, None) {
-            Ok(url) => {
-                let mut root = url.host();
-                let mut protocol: Option<&str> = None;
-                if url.scheme_type() != ada_url::SchemeType::Http && 
-                    url.scheme_type() != ada_url::SchemeType::Https {
-                    protocol = Some(url.protocol());
+    fn is_valid_claim(raw_uri: &Vec<u8>, claim_type: Self::ClaimType) -> Result<(), DispatchError> {
+        
+        match claim_type {
+            ClaimType::WebsiteDomain { is_root } => {
+                if is_root {
+                    ensure!(Self::is_root(&raw_uri).is_ok(), Error::<T>::NotBaseURI);
+                    return Ok(())
                 }
-
-                // Check path from `url`. Return `Err` if any
-                if url.pathname().len() != 1 {
-                    return Err(Error::<T>::NotBaseURI.into());
-                }
-
-                let domain = addr::parse_domain_name(root)
-                    .map_err(|e| {
-                        sp_std::if_std! { println!("{:?}", e) }
-                        Error::<T>::ErrorOnParse
-                    })?;
-                if domain.prefix() != None 
-                    && domain.prefix() != Some("www") {
-                    return Err(Error::<T>::NotBaseURI.into());
-                }
-                root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
-                if let Some(protocol) = protocol {
-                    let mut raw_root: Vec<u8> = Vec::new();
-                    raw_root.append(&mut protocol.as_bytes().to_vec());
-                    raw_root.append(&mut "//".as_bytes().to_vec());
-                    raw_root.append(&mut root.as_bytes().to_vec());
-                    return Ok(raw_root.try_into().map_err(|_| Error::<T>::OverMaxSize)?)
-                }
-                Ok(root
-                    .as_bytes()
-                    .to_vec()
-                    .try_into()
-                    .map_err(|_| Error::<T>::OverMaxSize)?
-                )
+                Ok(())
             },
-            Err(_e) => { 
-                let mut root = maybe_root;
-                match addr::parse_domain_name(root) {
-                    Ok(domain) => {
-                        root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
-                    },
-                    Err(_e) => {
-                        return Err(Error::<T>::NotBaseURI.into())
-                    }
+            ClaimType::WebServiceAccount { is_root, is_oracle } => {
+                if is_root {
+                    ensure!(Self::is_root(&raw_uri).is_ok(), Error::<T>::NotBaseURI);
+                    return Ok(())
+                } 
+    
+                if is_oracle {
+                    // "instagram.com/*"
+                    let bounded_uri: URI = raw_uri.clone().try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                    let uris = URIByOracle::<T>::get();
+                    ensure!(uris.contains(&bounded_uri), Error::<T>::NotURIByOracle);
+                    return Ok(())
+                } else {
+                    return Ok(())
                 }
-                Ok(root
-                    .as_bytes()
-                    .to_vec()
-                    .try_into()
-                    .map_err(|_| Error::<T>::OverMaxSize)?
-                )
+            }, 
+            ClaimType::File => {
+                let protocol = "urauth://file/";
+                ensure!(raw_uri[0..protocol.len()] == protocol.as_bytes().to_vec(), Error::<T>::BadClaim);
+                Ok(())
+            }, 
+            ClaimType::Dataset { .. } => {
+                let protocol = "urauth://dataset/";
+                ensure!(raw_uri[0..protocol.len()] == protocol.as_bytes().to_vec(), Error::<T>::BadClaim);
+                Ok(())
             }
         }
     }
 
-    fn root_domain(raw_uri: Vec<u8>) -> Result<Self::URI, DispatchError> {
-        let maybe_root = sp_std::str::from_utf8(&raw_uri)
-            .map_err(|_| Error::<T>::ErrorConvertToString)?;
-        match ada_url::Url::parse(maybe_root, None) {
-            Ok(url) => {
-                let mut root = url.host();
-                let mut protocol: Option<&str> = None;
-                if url.scheme_type() != ada_url::SchemeType::Http && 
-                    url.scheme_type() != ada_url::SchemeType::Https {
-                    protocol = Some(url.protocol());
-                }
+    fn is_root(raw_uri: &Vec<u8>) -> DispatchResult {
+        let uri_part = Self::deconstruct_uri(raw_uri)?;
+        ensure!(!uri_part.is_root(), Error::<T>::NotBaseURI);
+        Ok(())
+    }
 
-                let domain = addr::parse_domain_name(root)
-                    .map_err(|e| {
-                        sp_std::if_std! { println!("{:?}", e) }
-                        Error::<T>::ErrorOnParse
-                    })?;
-                root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
-                if let Some(protocol) = protocol {
-                    let mut raw_root: Vec<u8> = Vec::new();
-                    raw_root.append(&mut protocol.as_bytes().to_vec());
-                    raw_root.append(&mut "//".as_bytes().to_vec());
-                    raw_root.append(&mut root.as_bytes().to_vec());
-                    return Ok(raw_root.try_into().map_err(|_| Error::<T>::OverMaxSize)?)
-                }
-                Ok(root
-                    .as_bytes()
-                    .to_vec()
-                    .try_into()
-                    .map_err(|_| Error::<T>::OverMaxSize)?
-                )
-            },
-            Err(_e) => { 
-                let mut root = maybe_root;
-                match addr::parse_domain_name(root) {
-                    Ok(domain) => {
-                        root = domain.root().ok_or(Error::<T>::ErrorOnParse)?;
-                    },
-                    Err(_e) => {
-                        root = root
-                            .split('/')
-                            .collect::<Vec<&str>>()
-                            .first()
-                            .ok_or(Error::<T>::ErrorOnParse)?;
-                    }
-                }
-                Ok(root
-                    .as_bytes()
-                    .to_vec()
-                    .try_into()
-                    .map_err(|_| Error::<T>::OverMaxSize)?
-                )
-            }
-        }
+    fn root(raw_uri: &Vec<u8>) -> Result<Self::URI, DispatchError> {
+        let uri_part = Self::deconstruct_uri(raw_uri)?;
+        let bounded_uri: URI = uri_part.root().try_into()
+            .map_err(|_| Error::<T>::OverMaxSize)?;
+        Ok(bounded_uri)
     }
 
     // ToDo: Check valid uri
     // ToDO: Given uri assumes it has no protocol
-    fn check_parent_owner(raw_url: Vec<u8>, maybe_owner: T::AccountId) -> Result<(), DispatchError> {
-        let input = sp_std::str::from_utf8(&raw_url)
-            .map_err(|_| Error::<T>::ErrorOnParse)?;
-        let base_domain = <Self as Parser<T>>::root_domain(raw_url.clone())?;
-        let base_domain_str = sp_std::str::from_utf8(&base_domain)
-            .map_err(|_| Error::<T>::ErrorConvertToString)?; 
-
-        Self::try_check_parent_owner(input, base_domain_str, maybe_owner)
+    fn check_parent_owner(raw_uri: &Vec<u8>, maybe_owner: T::AccountId) -> Result<(), DispatchError> {
+        Self::try_check_parent_owner(raw_uri, maybe_owner)
     }
 }
 

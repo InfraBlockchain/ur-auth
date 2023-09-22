@@ -273,8 +273,10 @@ pub mod pallet {
         BadSigner,
         /// General error on challenge value(e.g parsing json-string, different challenge value).
         BadChallengeValue,
-        /// General Error on requesting ownership(e.g URAuth Request, Challenge Value)
+        /// General error on requesting ownership(e.g URAuth Request, Challenge Value)
         BadRequest,
+        /// General error on claiming ownership
+        BadClaim,
         /// Size is over limit of `MAX_*`
         OverMaxSize,
         /// Error on converting raw-json to json-string.
@@ -309,6 +311,8 @@ pub mod pallet {
         ProofMissing,
         /// Error when challenge value is not stored for requested URI.
         ChallengeValueMissing,
+        /// Given uri should have protocol
+        ProtocolMissing,
         /// Challenge value is not provided when `ChallengeValueConfig.randomness` is false.
         ChallengeValueNotProvided,
         /// When try to update `URAuthDoc` which has not registered.
@@ -322,7 +326,10 @@ pub mod pallet {
     }
 
     #[pallet::call]
-    impl<T: Config> Pallet<T> {
+    impl<T: Config> Pallet<T> 
+    where
+        ClaimTypeFor<T>: From<ClaimType>,
+    {
         // Description:
         // This transaction is for a domain owner to request ownership registration in the URAuthTree.
         // It involves verifying the signature for the data owner's DID on the given URI and,
@@ -354,7 +361,10 @@ pub mod pallet {
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            ensure!(claim_type.should_claim_by_oracle(), Error::<T>::BadRequest);
+            ensure!(
+                T::URAuthParser::is_valid_claim(&uri, claim_type.clone().into()).is_ok(), 
+                Error::<T>::BadRequest
+            );
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
@@ -510,7 +520,7 @@ pub mod pallet {
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let signer_acc = Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
-            T::URAuthParser::check_parent_owner(uri, signer_acc)?;
+            T::URAuthParser::check_parent_owner(&uri, signer_acc)?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
             // ToDo: Check that raw_url is not base
@@ -519,6 +529,7 @@ pub mod pallet {
                     data_source,
                     name,
                     description,
+                    ..
                 } => {
                     let bounded_name: AnyText =
                         name.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
