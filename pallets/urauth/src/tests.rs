@@ -152,7 +152,7 @@ fn urauth_request_register_ownership_works() {
             "www.website1.com".as_bytes().to_vec(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain { is_root: true },
+            ClaimType::WebsiteDomain,
             signer.clone(),
             signature.clone()
         ));
@@ -175,7 +175,7 @@ fn urauth_request_register_ownership_works() {
                 uri.clone(),
                 urauth_helper.generate_did(BOB_SS58).as_bytes().to_vec(),
                 Some(urauth_helper.challenge_value()),
-                ClaimType::WebsiteDomain { is_root: true },
+                ClaimType::WebsiteDomain,
                 signer.clone(),
                 signature.clone()
             ),
@@ -197,7 +197,7 @@ fn urauth_request_register_ownership_works() {
                 uri.clone(),
                 owner_did.clone(),
                 Some(urauth_helper.challenge_value()),
-                ClaimType::WebsiteDomain { is_root: true },
+                ClaimType::WebsiteDomain,
                 signer.clone(),
                 signature2
             ),
@@ -222,7 +222,7 @@ fn urauth_request_register_ownership_works() {
                 uri.clone(),
                 owner_did,
                 Some(urauth_helper.challenge_value()),
-                ClaimType::WebsiteDomain { is_root: true },
+                ClaimType::WebsiteDomain,
                 signer.clone(),
                 signature3
             ),
@@ -263,7 +263,7 @@ fn verify_challenge_works() {
             uri.clone(),
             owner_did,
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain { is_root: true },
+            ClaimType::WebsiteDomain,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -317,7 +317,7 @@ fn update_urauth_doc_works() {
             uri.clone(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain { is_root: true },
+            ClaimType::WebsiteDomain,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -575,7 +575,7 @@ fn verify_challenge_with_multiple_oracle_members() {
             uri.clone(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain { is_root: true },
+            ClaimType::WebsiteDomain,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -714,47 +714,74 @@ fn parse_string_works() {
 #[test]
 fn parser_works() {
 
-    is_root_domain("http://instagram.com", "instagram.com");
-    is_root_domain("https://instagram.com", "instagram.com");
-    is_root_domain("https://www.instagram.com", "instagram.com");
-    is_root_domain("https://sub2.sub1.www.instagram.com", "instagram.com");
-    is_root_domain("www.instagram.com", "instagram.com");
-    is_root_domain("instagram.com", "instagram.com");
-    is_root_domain("instagram.com/user", "instagram.com");
-    is_root_domain("instagram.com/user/challenge.json", "instagram.com");
-    is_root_domain("ftp://www.instagram.com", "ftp://instagram.com");
-    is_root_domain("ftp://instagram.com", "ftp://instagram.com");
-    is_root_domain("ftp://sub2.sub1.www.instagram.com", "ftp://instagram.com");
-    is_root_domain("smtp://sub2.sub1.www.instagram.com", "smtp://instagram.com");
+    assert_eq!(is_root_domain("http://instagram.com", ClaimType::WebServiceAccount), true);
+    assert_eq!(is_root_domain("https://instagram.com", ClaimType::WebServiceAccount), true);
+    assert_eq!(is_root_domain("https://www.instagram.com", ClaimType::WebServiceAccount), true);
+    assert_eq!(is_root_domain("https://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
+    assert_eq!(is_root_domain("ftp://www.instagram.com", ClaimType::WebServiceAccount), true);
+    assert_eq!(is_root_domain("ftp://instagram.com", ClaimType::WebServiceAccount), true);
+    assert_eq!(is_root_domain("ftp://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
+    assert_eq!(is_root_domain("smtp://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
+    assert_eq!(is_root_domain("www.instagram.com", ClaimType::WebServiceAccount), true);
+    assert_eq!(is_root_domain("sub1.instagram.com", ClaimType::WebServiceAccount), false);
+    assert_eq!(is_root_domain("urauth://file/", ClaimType::WebServiceAccount), false);
 }
 
-fn is_root_domain(url: &str, expect: &str) {
-    let urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
-    let url: String = url.into();
-    let raw_url: Vec<u8> = url.clone().into();
-    match <URAuthParser<Test> as Parser<Test>>::is_root(&raw_url) {
-        Ok(_) => {
-            println!(" Given URI is base uri => {:?}", url);
-        },
-        Err(_) => { 
-            println!(" Given URI is not base uri. => {:?}", url);
-            println!(" Parse it! => {:?}", sp_std::str::from_utf8(&<URAuthParser<Test> as Parser<Test>>::root(&url.as_bytes().to_vec()).unwrap().to_vec()));
-            return 
-        }
-    }
-}
-
-#[test]
-fn protocol_index_works() {
-    assert_eq!(URAuthParser::<Test>::has_protocol("https://instagram.com").unwrap(), 8);
-    assert_eq!(URAuthParser::<Test>::has_protocol("urauth://cid").unwrap(), 9);
-    assert_eq!(URAuthParser::<Test>::has_protocol("smtp://instagram.com").unwrap(), 7);
+fn is_root_domain(uri: &str, claim_type: ClaimType) -> bool {
+    let uri: String = uri.into();
+    let raw_uri: Vec<u8> = uri.clone().into();
+    let part = <URAuthParser<Test> as Parser<Test>>::parse(&raw_uri, &claim_type).unwrap();
+    <URAuthParser<Test> as Parser<Test>>::is_root(&part)
 }
 
 #[test]
 fn deconstruct_works() {
-    let uri_part = URAuthParser::<Test>::deconstruct_uri(&"https://sub2.sub1.instagram.com/user1/feed".as_bytes().to_vec()).unwrap();
+    let raw_uri = "https://sub2.sub1.instagram.com/user1/feed".as_bytes().to_vec();
+    let uri_part = URAuthParser::<Test>::deconstruct_uri(
+        &raw_uri,
+        &ClaimType::WebServiceAccount
+    ).unwrap();
     println!("{}", uri_part);
-    println!("{:?}", std::str::from_utf8(&uri_part.root()));
-    println!("{:?}", std::str::from_utf8(&uri_part.full_uri()));
+    println!("{:?}", std::str::from_utf8(&uri_part.root().unwrap()));
+    println!("{:?}", std::str::from_utf8(&uri_part.full_uri().1));
+    new_test_ext().execute_with(|| {
+        println!("{:?}", URAuthParser::<Test>::try_check_parent_owner(
+            &raw_uri, 
+            &Alice.to_account_id(), 
+            &ClaimType::WebServiceAccount
+        ));
+
+        println!("{:?}", URAuthParser::<Test>::try_check_parent_owner(
+            &"urauth://file/cid/alice".as_bytes().to_vec(), 
+            &Alice.to_account_id(), 
+            &ClaimType::WebServiceAccount
+        ));
+    });
+    let raw_uri = "instagram.com".as_bytes().to_vec();
+    let uri_part = URAuthParser::<Test>::deconstruct_uri(
+        &raw_uri,
+        &ClaimType::WebServiceAccount
+    ).unwrap();
+    println!("{}", uri_part);
+    println!("{:?}", std::str::from_utf8(&uri_part.root().unwrap()));
+    println!("{:?}", std::str::from_utf8(&uri_part.full_uri().1));
+}
+
+#[test]
+fn ada_parse() {
+    let url = ada_url::Url::parse("news:comp.lang.python", None).unwrap();
+    println!("{:?}", url.hostname());
+    println!("{:?}", url.pathname());
+    let url = ada_url::Url::parse("urauth://sub1.file/cid", None).unwrap();
+    println!("{:?}", url.hostname());
+    println!("{:?}", url.pathname());   
+    let url = ada_url::Url::parse("urauth://file/cid/alice", None).unwrap();
+    println!("{:?}", url.hostname());
+    println!("{:?}", url.pathname());  
+    let uri_part = <URAuthParser<Test> as Parser<Test>>::parse(&"urauth://file/cid/alice".as_bytes().to_vec(), &ClaimType::WebServiceAccount).unwrap();
+    println!("{}", uri_part);
+    println!("{:?}", std::str::from_utf8(&uri_part.full_uri().1));
+    let url = ada_url::Url::parse("urauth://dataset/cid", None).unwrap();
+    println!("{:?}", url.hostname());
+    println!("{:?}", url.pathname());
 }

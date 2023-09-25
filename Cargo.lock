@@ -7383,7 +7383,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-urauth"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ada-url",
  "addr",

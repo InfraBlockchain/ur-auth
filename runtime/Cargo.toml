@@ -24,7 +24,7 @@ scale-info = { version = "2.3.1", default-features = false, features = ["derive"
 smallvec = "1.10.0"
 
 # Local
-pallet-urauth = { version = "0.1.0", default-features = false, path = "../pallets/urauth" }
+pallet-urauth = { version = "0.1.1", default-features = false, path = "../pallets/urauth" }
 pallet-urauth-runtime-api = { version = "0.1.0", default-features = false, path = "../pallets/urauth/runtime-api" }
 
 # Substrate

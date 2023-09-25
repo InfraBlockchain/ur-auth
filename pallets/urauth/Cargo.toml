@@ -2,10 +2,10 @@
 name = "pallet-urauth"
 authors = ["blockchain labs"]
 description = "URAuth pallet"
-version = "0.1.0"
+version = "0.1.1"
 license = "Unlicense"
 homepage = "https://bc-labs.net/"
-repository = "https://github.com/InfraBlockchain/infra-substrate/"
+repository = "https://github.com/InfraBlockchain/ur-auth"
 edition = "2021"
 
 [package.metadata.docs.rs]

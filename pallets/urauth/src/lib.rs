@@ -277,6 +277,8 @@ pub mod pallet {
         BadRequest,
         /// General error on claiming ownership
         BadClaim,
+        /// General error on URI
+        BadURI,
         /// Size is over limit of `MAX_*`
         OverMaxSize,
         /// Error on converting raw-json to json-string.
@@ -361,10 +363,6 @@ pub mod pallet {
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            ensure!(
-                T::URAuthParser::is_valid_claim(&uri, claim_type.clone().into()).is_ok(), 
-                Error::<T>::BadRequest
-            );
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
@@ -520,7 +518,7 @@ pub mod pallet {
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let signer_acc = Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
-            T::URAuthParser::check_parent_owner(&uri, signer_acc)?;
+            T::URAuthParser::check_parent_owner(&uri, &signer_acc, &claim_type)?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
             // ToDo: Check that raw_url is not base
