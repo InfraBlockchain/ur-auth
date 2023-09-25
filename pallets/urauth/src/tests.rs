@@ -748,13 +748,13 @@ fn is_root_domain(uri: &str, claim_type: ClaimType) -> bool {
     let uri: String = uri.into();
     let raw_uri: Vec<u8> = uri.clone().into();
     let part = <URAuthParser<Test> as Parser<Test>>::parse(&raw_uri, &claim_type).unwrap();
-    <URAuthParser<Test> as Parser<Test>>::is_root(&part).is_ok()
+    part.is_root()
 }
 
 #[test]
 fn deconstruct_works() {
     let raw_uri = "https://sub2.sub1.instagram.com/user1/feed".as_bytes().to_vec();
-    let uri_part = URAuthParser::<Test>::deconstruct_uri(
+    let uri_part = URAuthParser::<Test>::try_parse(
         &raw_uri,
         &ClaimType::WebServiceAccount
     ).unwrap();
@@ -762,20 +762,20 @@ fn deconstruct_works() {
     println!("{:?}", std::str::from_utf8(&uri_part.root().unwrap()));
     println!("{:?}", std::str::from_utf8(&uri_part.full_uri().1));
     new_test_ext().execute_with(|| {
-        println!("{:?}", URAuthParser::<Test>::try_check_parent_owner(
+        println!("{:?}", URAuth::check_parent_owner(
             &raw_uri, 
             &Alice.to_account_id(), 
             &ClaimType::WebServiceAccount
         ));
 
-        println!("{:?}", URAuthParser::<Test>::try_check_parent_owner(
+        println!("{:?}", URAuth::check_parent_owner(
             &"urauth://file/cid/alice".as_bytes().to_vec(), 
             &Alice.to_account_id(), 
             &ClaimType::WebServiceAccount
         ));
     });
     let raw_uri = "instagram.com".as_bytes().to_vec();
-    let uri_part = URAuthParser::<Test>::deconstruct_uri(
+    let uri_part = URAuthParser::<Test>::try_parse(
         &raw_uri,
         &ClaimType::WebServiceAccount
     ).unwrap();
@@ -801,4 +801,41 @@ fn ada_parse() {
     let url = ada_url::Url::parse("urauth://dataset/cid", None).unwrap();
     println!("{:?}", url.hostname());
     println!("{:?}", url.pathname());
+}
+
+#[test]
+fn uri_part_eq_works() {
+    let uri_part1 = URIPart::new(
+        "https://".into(),
+        None,
+        Some("instagram.com".into()),
+        None
+    );
+    let uri_part2 = URIPart::new(
+        "https://".into(),
+        None,
+        Some("instagram.com".into()),
+        None
+    );
+    assert!(uri_part1 == uri_part2);
+    let uri_part3 = URIPart::new(
+        "https://".into(),
+        None,
+        Some("instagram.com".into()),
+        Some("/coco".into())
+    );
+    let uri_part4 = URIPart::new(
+        "https://".into(),
+        None,
+        Some("instagram.com".into()),
+        Some("/coco/1/2/3".into())
+    );
+    let uri_part_any_path = URIPart::new(
+        "https://".into(),
+        None,
+        Some("instagram.com".into()),
+        Some("/*".into())
+    );
+    assert!(uri_part3 == uri_part_any_path);
+    assert!(uri_part4 == uri_part_any_path);
 }

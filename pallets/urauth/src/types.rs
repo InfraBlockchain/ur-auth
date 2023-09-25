@@ -27,12 +27,72 @@ pub enum URIRequestType<Account> {
     Any { maybe_parent_acc: Account },
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+#[derive(Encode, Decode, Clone, Eq, RuntimeDebug, TypeInfo)]
 pub struct URIPart {
     pub scheme: Vec<u8>,
     pub sub_domain: Option<Vec<u8>>,
     pub host: Option<Vec<u8>>,
     pub path: Option<Vec<u8>>,
+}
+
+impl PartialEq for URIPart {
+    fn eq(&self, other: &Self) -> bool {
+        let any = b'*';
+        if !other.scheme.contains(&any) {
+            if self.scheme != other.scheme {
+                return false;
+            }
+        }
+        match (self.sub_domain.clone(), other.sub_domain.clone()) {
+            (Some(s), Some(o_s)) => {
+                if s.len() < o_s.len() {
+                    return false
+                }
+                if let Some(i) = o_s.iter().position(|s| *s == any) {
+                    if i+1 > o_s.len() {
+                        return false;
+                    }
+                    if s[i+1..o_s.len()].to_vec() != o_s[i+1..o_s.len()].to_vec() {
+                        return false;
+                    }
+                } else {
+                    if s != o_s {
+                        return false;
+                    }
+                }
+            },
+            (None, None) => {},
+            _ => { return false }
+        }
+        match (self.host.clone(), other.host.clone()) {
+            (Some(s), Some(o_s)) => {
+                if s != o_s {
+                    return false
+                }
+            },
+            (None, None) => {},
+            _ => { return false }
+        }
+        match (self.path.clone(), other.path.clone()) {
+            (Some(s), Some(o_s)) => {
+                if s.len() < o_s.len() {
+                    return false
+                }
+                if let Some(i) = o_s.iter().position(|s| *s == any) {
+                    if s[0..i].to_vec() != o_s[0..i].to_vec() {
+                        return false;
+                    }
+                } else {
+                    if s != o_s {
+                        return false;
+                    }
+                }
+            },
+            (None, None) => {},
+            _ => { return false }
+        }
+        true
+    }
 }
 
 impl URIPart {
@@ -823,9 +883,7 @@ pub trait Parser<T: Config> {
 
     fn parse(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<Self::Part, DispatchError>;
 
-    fn is_root(part: &Self::Part) -> Result<Self::URI, DispatchError>;
-
-    fn check_parent_owner(raw_uri: &Vec<u8>, owner: &T::AccountId, claim_type: &ClaimType) -> Result<(), DispatchError>;
+    fn parse_parent_uris(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<Vec<URI>, DispatchError>;
 
     fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
         Ok(Default::default())
@@ -855,7 +913,7 @@ impl<T: Config> URAuthParser<T> {
         uri
     }
 
-    pub fn deconstruct_uri(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<URIPart, DispatchError> {
+    pub fn try_parse(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<URIPart, DispatchError> {
         if raw_uri.len() < 3 {
             return Err(Error::<T>::BadURI.into());
         }
@@ -907,9 +965,9 @@ impl<T: Config> URAuthParser<T> {
     /// Parse the given uri and will return the list of the parsed `URI`
     fn try_parse_parent_uris(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<Vec<URI>, DispatchError> {
         
-        let uri_part = Self::deconstruct_uri(raw_uri, claim_type)?;
+        let uri_part = Self::try_parse(raw_uri, claim_type)?;
         let mut is_root = false; 
-        if <Self as Parser<T>>::is_root(&uri_part).is_ok() {
+        if uri_part.is_root() {
             is_root = true;
         }
         // Only parse if there is root. Otherwise, return `Err`
@@ -956,31 +1014,6 @@ impl<T: Config> URAuthParser<T> {
             Err(Error::<T>::ErrorOnParse.into())
         }
     }
-
-    /// Check owner of given 'uri'. Parse the given uri 
-    /// and check whether given owner is one of the owner of the parent_uris
-    /// 
-    /// ## Example 
-    /// 
-    /// - uri: "sub2.sub1.example.com/path1"
-    /// 
-    /// - base: "example.com"
-    /// 
-    /// - parent_uri: ["(sub2.sub1.example.com, owner1)", "(sub1.example.com, owner2)", "(example.com, owner3)"]
-    /// 
-    /// Check `maybe_owner == owner1?` -> `maybe_owner == owner2?` -> `maybe_owner == owner3?`.
-    /// If not, return `Error::<T>::NotURAuthDocOwner`
-    pub fn try_check_parent_owner(raw_uri: &Vec<u8>, maybe_owner: &T::AccountId, claim_type: &ClaimType) -> Result<(), DispatchError> {
-        let uris = Self::try_parse_parent_uris(raw_uri, &claim_type)?;
-        for uri in uris {
-            if let Some(urauth_doc) = URAuthTree::<T>::get(&uri) {
-                if urauth_doc.is_owner(maybe_owner) {
-                    return Ok(())
-                }
-            }
-        }
-        Err(Error::<T>::NotURAuthDocOwner.into())
-    }
 }
 impl<T: Config> Parser<T> for URAuthParser<T> {
     
@@ -989,23 +1022,12 @@ impl<T: Config> Parser<T> for URAuthParser<T> {
     type ClaimType = ClaimType;
     type ChallengeValue = Vec<u8>;
 
-    fn parse(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<Self::Part, DispatchError> {
-        let uri_part = Self::deconstruct_uri(raw_uri, claim_type)?;
-        Ok(uri_part)
+    fn parse(raw_uri: &Vec<u8>, claim_type: &Self::ClaimType) -> Result<Self::Part, DispatchError> {
+        Self::try_parse(raw_uri, claim_type)
     }
 
-    fn is_root(part: &URIPart) -> Result<Self::URI, DispatchError> {
-        ensure!(part.is_root(), Error::<T>::NotRootURI);
-        if let Some(root) = part.root() {
-            let bounded_uri: URI = root.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            Ok(bounded_uri) 
-        } else {
-            Err(Error::<T>::NotValidURI.into())
-        }
-    }
-
-    fn check_parent_owner(raw_uri: &Vec<u8>, maybe_owner: &T::AccountId, claim_type: &ClaimType) -> Result<(), DispatchError> {
-        Self::try_check_parent_owner(raw_uri, maybe_owner, claim_type)
+    fn parse_parent_uris(raw_uri: &Vec<u8>, claim_type: &Self::ClaimType) -> Result<Vec<Self::URI>, DispatchError> {
+        Self::try_parse_parent_uris(raw_uri, claim_type)
     }
 }
 

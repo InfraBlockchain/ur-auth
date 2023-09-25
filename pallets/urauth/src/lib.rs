@@ -356,7 +356,7 @@ pub mod pallet {
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
             ensure!(matches!(uri_request_type, URIRequestType::Oracle { .. }), Error::<T>::BadClaim);
-            let bounded_uri = Self::check_claim(uri_request_type, &claim_type, &uri)?;
+            let bounded_uri = Self::check_request_type(uri_request_type, &claim_type, &uri)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
@@ -396,6 +396,7 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn verify_challenge(origin: OriginFor<T>, challenge_value: Vec<u8>) -> DispatchResult {
             let who = ensure_signed(origin)?;
+            
             ensure!(
                 Self::oracle_members().contains(&who),
                 Error::<T>::NotOracleMember
@@ -461,6 +462,7 @@ pub mod pallet {
             proof: Option<Proof>,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
+
             let (mut updated_urauth_doc, mut update_doc_status) =
                 Self::try_update_urauth_doc(&uri, &update_doc_field, updated_at, proof.clone())?;
             let (owner, proof) =
@@ -508,8 +510,9 @@ pub mod pallet {
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
+
             ensure!(matches!(uri_request_type, URIRequestType::Any { .. }), Error::<T>::BadClaim);
-            let bounded_uri = Self::check_claim(
+            let bounded_uri = Self::check_request_type(
                 uri_request_type, 
                 &claim_type, 
                 &uri
@@ -630,8 +633,8 @@ pub mod pallet {
             uri_request_type: URIRequestType<T::AccountId>,
             uri: Vec<u8>
         ) -> DispatchResult {
-            // ToDo: Governance 
             T::AuthorizedOrigin::ensure_origin(origin)?;
+
             let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
             match uri_request_type {
                 URIRequestType::Oracle { is_root } => {
@@ -659,10 +662,9 @@ pub mod pallet {
             uri_request_type: URIRequestType<T::AccountId>,
             uri: Vec<u8>
         ) -> DispatchResult {
-            // ToDo: Governance 
             T::AuthorizedOrigin::ensure_origin(origin)?;
+
             let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
-            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let mut is_removed = true;
             URIByOracle::<T>::try_mutate_exists(&uri_request_type, |uri_parts| -> DispatchResult {
                 if let Some(v) = uri_parts {
@@ -711,25 +713,61 @@ where
         Default::default()
     }
 
-    fn check_claim(uri_request_type: URIRequestType<T::AccountId>, claim_type: &ClaimType, raw_uri: &Vec<u8>) -> Result<URI, DispatchError> {
-        let uri_part = T::URAuthParser::parse(raw_uri, claim_type)?;
-        let mut bounded_uri: URI = raw_uri.clone().try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-        match uri_request_type {
+    fn check_request_type(uri_request_type: URIRequestType<T::AccountId>, claim_type: &ClaimType, raw_uri: &Vec<u8>) -> Result<URI, DispatchError> {
+        let parsed_uri_part: URIPart = T::URAuthParser::parse(raw_uri, claim_type)?.into();
+        let uri = match uri_request_type {
             URIRequestType::Oracle { is_root } => {
                 if is_root {
-                    bounded_uri = T::URAuthParser::is_root(&uri_part)?.into();
-                }
-                if let Some(uris_by_oracle) = URIByOracle::<T>::get(&uri_request_type) {
-                    ensure!(uris_by_oracle.contains(&uri_part.into()), Error::<T>::NotValidURI);
+                    ensure!(parsed_uri_part.is_root(), Error::<T>::NotRootURI);
+                    let (_, root_uri) = parsed_uri_part.full_uri();
+                    root_uri
                 } else {
-                    return Err(Error::<T>::BadClaim.into())
+                    let mut temp: Option<Vec<u8>> = None;
+                    if let Some(uri_parts) = URIByOracle::<T>::get(&uri_request_type) {
+                        for uri_part in uri_parts {
+                            if parsed_uri_part == uri_part {
+                                let (_, full_uri) = parsed_uri_part.full_uri();
+                                temp = Some(full_uri);
+                                break;
+                            }
+                        }
+                        temp.ok_or(Error::<T>::BadClaim)?
+                    } else {
+                        return Err(Error::<T>::BadClaim.into())
+                    }
                 }
             },
-            URIRequestType::Any { maybe_parent_acc }=> {
-                T::URAuthParser::check_parent_owner(raw_uri, &maybe_parent_acc, &claim_type)?;
+            URIRequestType::Any { maybe_parent_acc } => {
+                Self::check_parent_owner(raw_uri, &maybe_parent_acc, &claim_type)?;
+                raw_uri.clone()
+            }
+        };
+        Ok(uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?)
+    }
+
+    /// Check owner of given 'uri'. Parse the given uri 
+    /// and check whether given owner is one of the owner of the parent_uris
+    /// 
+    /// ## Example 
+    /// 
+    /// - uri: "sub2.sub1.example.com/path1"
+    /// 
+    /// - base: "example.com"
+    /// 
+    /// - parent_uri: ["(sub2.sub1.example.com, owner1)", "(sub1.example.com, owner2)", "(example.com, owner3)"]
+    /// 
+    /// Check `maybe_owner == owner1?` -> `maybe_owner == owner2?` -> `maybe_owner == owner3?`.
+    /// If not, return `Error::<T>::NotURAuthDocOwner`
+    fn check_parent_owner(raw_uri: &Vec<u8>, maybe_owner: &T::AccountId, claim_type: &ClaimType) -> Result<(), DispatchError> {
+        let uris = <URAuthParser<T> as Parser<T>>::parse_parent_uris(raw_uri, &claim_type)?;
+        for uri in uris {
+            if let Some(urauth_doc) = URAuthTree::<T>::get(&uri) {
+                if urauth_doc.is_owner(maybe_owner) {
+                    return Ok(())
+                }
             }
         }
-        Ok(bounded_uri)
+        Err(Error::<T>::NotURAuthDocOwner.into())
     }
 
     fn new_urauth_doc(
