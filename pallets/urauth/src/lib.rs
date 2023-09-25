@@ -688,7 +688,8 @@ pub mod pallet {
 
 impl<T: Config> Pallet<T> 
 where
-    URIFor<T>: Into<URI>
+    URIFor<T>: Into<URI>,
+    URIPartFor<T>: IsType<URIPart>,
 {
     /// 16 bytes uuid based on `URAuthDocCount`
     fn doc_id() -> Result<DocId, DispatchError> {
@@ -719,7 +720,7 @@ where
                     bounded_uri = T::URAuthParser::is_root(&uri_part)?.into();
                 }
                 if let Some(uris_by_oracle) = URIByOracle::<T>::get(&uri_request_type) {
-                    ensure!(uris_by_oracle.contains(&bounded_uri), Error::<T>::NotValidURI);
+                    ensure!(uris_by_oracle.contains(&uri_part.into()), Error::<T>::NotValidURI);
                 } else {
                     return Err(Error::<T>::BadClaim.into())
                 }
