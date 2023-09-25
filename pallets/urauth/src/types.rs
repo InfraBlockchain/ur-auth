@@ -17,7 +17,16 @@ pub type ApprovalCount = u32;
 pub type Threshold = u32;
 pub type URAuthDocCount = u128;
 
+pub type URIFor<T> = <<T as Config>::URAuthParser as Parser<T>>::URI;
+pub type URIPartFor<T> = <<T as Config>::URAuthParser as Parser<T>>::Part;
 pub type ClaimTypeFor<T> = <<T as Config>::URAuthParser as Parser<T>>::ClaimType;
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+pub enum URIRequestType<Account> {
+    Oracle { is_root: bool },
+    Any { maybe_parent_acc: Account },
+}
+
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct URIPart {
     pub scheme: Vec<u8>,
@@ -808,13 +817,13 @@ impl sp_runtime::traits::Printable for UpdateDocStatusError {
 pub trait Parser<T: Config> {
 
     type URI; 
-    type Part;
+    type Part: Clone + sp_std::fmt::Debug + PartialEq;
     type ClaimType;
     type ChallengeValue: Default;
 
     fn parse(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<Self::Part, DispatchError>;
 
-    fn is_root(part: &Self::Part) -> bool;
+    fn is_root(part: &Self::Part) -> Result<Self::URI, DispatchError>;
 
     fn check_parent_owner(raw_uri: &Vec<u8>, owner: &T::AccountId, claim_type: &ClaimType) -> Result<(), DispatchError>;
 
@@ -900,7 +909,7 @@ impl<T: Config> URAuthParser<T> {
         
         let uri_part = Self::deconstruct_uri(raw_uri, claim_type)?;
         let mut is_root = false; 
-        if <Self as Parser<T>>::is_root(&uri_part) {
+        if <Self as Parser<T>>::is_root(&uri_part).is_ok() {
             is_root = true;
         }
         // Only parse if there is root. Otherwise, return `Err`
@@ -985,8 +994,14 @@ impl<T: Config> Parser<T> for URAuthParser<T> {
         Ok(uri_part)
     }
 
-    fn is_root(part: &URIPart) -> bool {
-        part.is_root()
+    fn is_root(part: &URIPart) -> Result<Self::URI, DispatchError> {
+        ensure!(part.is_root(), Error::<T>::NotRootURI);
+        if let Some(root) = part.root() {
+            let bounded_uri: URI = root.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            Ok(bounded_uri) 
+        } else {
+            Err(Error::<T>::NotValidURI.into())
+        }
     }
 
     fn check_parent_owner(raw_uri: &Vec<u8>, maybe_owner: &T::AccountId, claim_type: &ClaimType) -> Result<(), DispatchError> {

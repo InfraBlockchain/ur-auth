@@ -158,8 +158,9 @@ pub mod pallet {
         StorageValue<_, BoundedVec<T::AccountId, T::MaxOracleMembers>, ValueQuery>;
 
     #[pallet::storage]
+    #[pallet::unbounded]
     pub type URIByOracle<T: Config> = 
-        StorageValue<_, BoundedVec<URI, T::MaxURIByOracle>, ValueQuery>;
+        StorageMap<_, Blake2_128Concat, URIRequestType<T::AccountId>, Vec<URIPart>, OptionQuery>;
 
     /// **Description:**
     ///
@@ -185,7 +186,6 @@ pub mod pallet {
     pub struct GenesisConfig<T: Config> {
         pub oracle_members: Vec<T::AccountId>,
         pub challenge_value_config: ChallengeValueConfig,
-        pub uris_by_oracle: Vec<Vec<u8>>
     }
 
     #[cfg(feature = "std")]
@@ -194,7 +194,6 @@ pub mod pallet {
             GenesisConfig {
                 oracle_members: Default::default(),
                 challenge_value_config: Default::default(),
-                uris_by_oracle: Default::default(),
             }
         }
     }
@@ -209,17 +208,6 @@ pub mod pallet {
                 .expect("Max Oracle members reached!");
             OracleMembers::<T>::put(oracle_members);
             URAuthConfig::<T>::put(self.challenge_value_config.clone());
-            let uris_by_oracle: BoundedVec<URI, T::MaxURIByOracle> = self
-                .uris_by_oracle
-                .iter()
-                .map(|uri| { 
-                    let bounded_uri = uri.to_owned().try_into().expect("Too Long!");
-                    bounded_uri
-                })
-                .collect::<Vec<URI>>()
-                .try_into()
-                .expect("Too long");
-            URIByOracle::<T>::put(uris_by_oracle);
         }
     }
 
@@ -253,11 +241,12 @@ pub mod pallet {
         },
         /// List of `URIByOracle` has been added
         URIByOracleAdded {
-            uri: URI,
+            uri_part: URIPartFor<T>,
+            uri_request_type: URIRequestType<T::AccountId>
         },
         /// List of `URIByOracle` has been removed
         URIByOracleRemoved {
-            uri: URI,
+            uri_part: URIPartFor<T>,
         },
         /// Request of registering URI has been removed.
         Removed { uri: URI },
@@ -303,12 +292,12 @@ pub mod pallet {
         NotURAuthDocOwner,
         /// Given URI is not URI which should be verified by Oracle
         NotURIByOracle,
-        /// Given URI is not base URI
-        NotBaseURI,
         /// Given URI is not valid
         NotValidURI,
         /// Given URI should be claimed by Oracle
         NotClaimByOracle,
+        /// Given URI is not root
+        NotRootURI,
         /// General error on proof where it is required but it is not given.
         ProofMissing,
         /// Error when challenge value is not stored for requested URI.
@@ -330,6 +319,8 @@ pub mod pallet {
     #[pallet::call]
     impl<T: Config> Pallet<T> 
     where
+        URIFor<T>: Into<URI>,
+        URIPartFor<T>: IsType<URIPart>,
         ClaimTypeFor<T>: From<ClaimType>,
     {
         // Description:
@@ -355,18 +346,20 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn urauth_request_register_ownership(
             origin: OriginFor<T>,
+            claim_type: ClaimType,
             uri: Vec<u8>,
+            uri_request_type: URIRequestType<T::AccountId>,
             owner_did: Vec<u8>,
             challenge_value: Option<Randomness>,
-            claim_type: ClaimType,
             signer: MultiSigner,
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            ensure!(matches!(uri_request_type, URIRequestType::Oracle { .. }), Error::<T>::BadClaim);
+            let bounded_uri = Self::check_claim(uri_request_type, &claim_type, &uri)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            let _ = Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
+            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
 
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
@@ -508,17 +501,22 @@ pub mod pallet {
         pub fn claim_ownership(
             origin: OriginFor<T>,
             claim_type: ClaimType,
+            uri_request_type: URIRequestType<T::AccountId>,
             uri: Vec<u8>,
             owner_did: Vec<u8>,
             signer: MultiSigner,
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            let bounded_uri: URI = uri.clone().try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            ensure!(matches!(uri_request_type, URIRequestType::Any { .. }), Error::<T>::BadClaim);
+            let bounded_uri = Self::check_claim(
+                uri_request_type, 
+                &claim_type, 
+                &uri
+            )?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            let signer_acc = Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
-            T::URAuthParser::check_parent_owner(&uri, &signer_acc, &claim_type)?;
+            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
             // ToDo: Check that raw_url is not base
@@ -628,16 +626,28 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn add_uri_by_oracle(
             origin: OriginFor<T>,
+            claim_type: ClaimType,
+            uri_request_type: URIRequestType<T::AccountId>,
             uri: Vec<u8>
         ) -> DispatchResult {
             // ToDo: Governance 
             T::AuthorizedOrigin::ensure_origin(origin)?;
-            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            URIByOracle::<T>::try_mutate(|uris| -> DispatchResult {
-                uris.try_push(bounded_uri.clone()).map_err(|_| Error::<T>::OverMaxSize)?;
+            let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
+            match uri_request_type {
+                URIRequestType::Oracle { is_root } => {
+                    if is_root {
+                        ensure!(uri_part.is_root(), Error::<T>::NotRootURI);
+                    }
+                },
+                _ => { return Err(Error::<T>::BadRequest.into()) }
+            }
+            URIByOracle::<T>::try_mutate_exists(&uri_request_type, |uri_parts| -> DispatchResult {
+                let mut new = uri_parts.clone().map_or(Vec::new(), |v| v.to_vec());
+                new.push(uri_part.clone());
+                *uri_parts = Some(new.try_into().map_err(|_| Error::<T>::OverMaxSize)?);
                 Ok(())
             })?;
-            Self::deposit_event(Event::<T>::URIByOracleAdded { uri: bounded_uri });
+            Self::deposit_event(Event::<T>::URIByOracleAdded { uri_part: uri_part.into(), uri_request_type });
             Ok(())
         }
 
@@ -645,28 +655,41 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn remove_uri_by_oracle(
             origin: OriginFor<T>,
+            claim_type: ClaimType,
+            uri_request_type: URIRequestType<T::AccountId>,
             uri: Vec<u8>
         ) -> DispatchResult {
             // ToDo: Governance 
             T::AuthorizedOrigin::ensure_origin(origin)?;
+            let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            URIByOracle::<T>::try_mutate(|uris| -> DispatchResult {
-                let uri = uris.into_iter()
-                    .filter(|u| {
-                        *u != &bounded_uri
-                    })
-                    .map(|u| u.clone())
-                    .collect::<Vec<URI>>();
-                *uris = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            let mut is_removed = true;
+            URIByOracle::<T>::try_mutate_exists(&uri_request_type, |uri_parts| -> DispatchResult {
+                if let Some(v) = uri_parts {
+                    let new = v.into_iter()
+                        .filter(|u| {
+                            *u != &uri_part
+                        })
+                        .map(|u| u.clone())
+                        .collect::<Vec<URIPart>>();
+                    *uri_parts = Some(new.try_into().map_err(|_| Error::<T>::OverMaxSize)?);
+                } else {
+                    is_removed = false;
+                }
                 Ok(())
             })?;
-            Self::deposit_event(Event::<T>::URIByOracleRemoved { uri: bounded_uri });
+            if is_removed {
+                Self::deposit_event(Event::<T>::URIByOracleRemoved { uri_part: uri_part.into() });
+            }
             Ok(())
         }
     }
 }
 
-impl<T: Config> Pallet<T> {
+impl<T: Config> Pallet<T> 
+where
+    URIFor<T>: Into<URI>
+{
     /// 16 bytes uuid based on `URAuthDocCount`
     fn doc_id() -> Result<DocId, DispatchError> {
         let count = Counter::<T>::get();
@@ -685,6 +708,27 @@ impl<T: Config> Pallet<T> {
 
     fn challenge_value() -> Randomness {
         Default::default()
+    }
+
+    fn check_claim(uri_request_type: URIRequestType<T::AccountId>, claim_type: &ClaimType, raw_uri: &Vec<u8>) -> Result<URI, DispatchError> {
+        let uri_part = T::URAuthParser::parse(raw_uri, claim_type)?;
+        let mut bounded_uri: URI = raw_uri.clone().try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+        match uri_request_type {
+            URIRequestType::Oracle { is_root } => {
+                if is_root {
+                    bounded_uri = T::URAuthParser::is_root(&uri_part)?.into();
+                }
+                if let Some(uris_by_oracle) = URIByOracle::<T>::get(&uri_request_type) {
+                    ensure!(uris_by_oracle.contains(&bounded_uri), Error::<T>::NotValidURI);
+                } else {
+                    return Err(Error::<T>::BadClaim.into())
+                }
+            },
+            URIRequestType::Any { maybe_parent_acc }=> {
+                T::URAuthParser::check_parent_owner(raw_uri, &maybe_parent_acc, &claim_type)?;
+            }
+        }
+        Ok(bounded_uri)
     }
 
     fn new_urauth_doc(
@@ -711,7 +755,7 @@ impl<T: Config> Pallet<T> {
         owner_did: &OwnerDID,
         signature: &MultiSignature,
         signer: MultiSigner,
-    ) -> Result<T::AccountId, DispatchError> {
+    ) -> Result<(), DispatchError> {
         let urauth_signed_payload = URAuthSignedPayload::<T::AccountId>::Request {
             uri: uri.clone(),
             owner_did: owner_did.clone(),
@@ -731,7 +775,7 @@ impl<T: Config> Pallet<T> {
             return Err(Error::<T>::BadProof.into());
         }
 
-        Ok(signer_account_id)
+        Ok(())
     }
 
     /// Handle the result of _challenge value_ verification based on `VerificationSubmissionResult`

@@ -147,12 +147,21 @@ fn urauth_request_register_ownership_works() {
         ),
     );
     new_test_ext().execute_with(|| {
+
+        assert_ok!(URAuth::add_uri_by_oracle(
+            RuntimeOrigin::root(), 
+            ClaimType::WebsiteDomain,
+            URIRequestType::Oracle { is_root: true }, 
+            "website1.com".into()
+        ));
+
         assert_ok!(URAuth::urauth_request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
+            ClaimType::WebsiteDomain,
             "www.website1.com".as_bytes().to_vec(),
+            URIRequestType::Oracle { is_root: true },
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain,
             signer.clone(),
             signature.clone()
         ));
@@ -172,10 +181,11 @@ fn urauth_request_register_ownership_works() {
         assert_noop!(
             URAuth::urauth_request_register_ownership(
                 RuntimeOrigin::signed(Alice.to_account_id()),
+                ClaimType::WebsiteDomain,
                 uri.clone(),
+                URIRequestType::Oracle { is_root: true },
                 urauth_helper.generate_did(BOB_SS58).as_bytes().to_vec(),
                 Some(urauth_helper.challenge_value()),
-                ClaimType::WebsiteDomain,
                 signer.clone(),
                 signature.clone()
             ),
@@ -194,10 +204,11 @@ fn urauth_request_register_ownership_works() {
         assert_noop!(
             URAuth::urauth_request_register_ownership(
                 RuntimeOrigin::signed(Alice.to_account_id()),
+                ClaimType::WebsiteDomain,
                 uri.clone(),
+                URIRequestType::Oracle { is_root: true },
                 owner_did.clone(),
                 Some(urauth_helper.challenge_value()),
-                ClaimType::WebsiteDomain,
                 signer.clone(),
                 signature2
             ),
@@ -219,10 +230,11 @@ fn urauth_request_register_ownership_works() {
         assert_noop!(
             URAuth::urauth_request_register_ownership(
                 RuntimeOrigin::signed(Alice.to_account_id()),
+                ClaimType::WebsiteDomain,
                 uri.clone(),
+                URIRequestType::Oracle { is_root: true },
                 owner_did,
                 Some(urauth_helper.challenge_value()),
-                ClaimType::WebsiteDomain,
                 signer.clone(),
                 signature3
             ),
@@ -260,10 +272,11 @@ fn verify_challenge_works() {
 
         assert_ok!(URAuth::urauth_request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
+            ClaimType::WebsiteDomain,
             uri.clone(),
+            URIRequestType::Oracle { is_root: true },
             owner_did,
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -314,10 +327,11 @@ fn update_urauth_doc_works() {
 
         assert_ok!(URAuth::urauth_request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
+            ClaimType::WebsiteDomain,
             uri.clone(),
+            URIRequestType::Oracle { is_root: true },
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -572,10 +586,11 @@ fn verify_challenge_with_multiple_oracle_members() {
 
         assert_ok!(URAuth::urauth_request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
+            ClaimType::WebsiteDomain,
             uri.clone(),
+            URIRequestType::Oracle { is_root: true },
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
-            ClaimType::WebsiteDomain,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
@@ -630,6 +645,7 @@ fn claim_file_ownership_works() {
         assert_ok!(URAuth::claim_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
             ClaimType::File,
+            URIRequestType::Any { maybe_parent_acc: Alice.to_account_id() },
             "urauth://file".into(),
             owner_did,
             MultiSigner::Sr25519(Alice.public()),
@@ -663,6 +679,7 @@ fn register_dataset_works() {
                 name: "".into(),
                 description: "".into()
             },
+            URIRequestType::Any { maybe_parent_acc: Alice.to_account_id() },
             "urauth://file".into(),
             owner_did,
             MultiSigner::Sr25519(Alice.public()),
@@ -731,7 +748,7 @@ fn is_root_domain(uri: &str, claim_type: ClaimType) -> bool {
     let uri: String = uri.into();
     let raw_uri: Vec<u8> = uri.clone().into();
     let part = <URAuthParser<Test> as Parser<Test>>::parse(&raw_uri, &claim_type).unwrap();
-    <URAuthParser<Test> as Parser<Test>>::is_root(&part)
+    <URAuthParser<Test> as Parser<Test>>::is_root(&part).is_ok()
 }
 
 #[test]
