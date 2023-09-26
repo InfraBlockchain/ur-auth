@@ -344,7 +344,7 @@ pub mod pallet {
         // 3. If the signature is valid, generate a metadata(owner_did, challenge_value)
         #[pallet::call_index(0)]
         #[pallet::weight(1_000)]
-        pub fn urauth_request_register_ownership(
+        pub fn request_register_ownership(
             origin: OriginFor<T>,
             claim_type: ClaimType,
             uri: Vec<u8>,
@@ -503,8 +503,8 @@ pub mod pallet {
         pub fn claim_ownership(
             origin: OriginFor<T>,
             claim_type: ClaimType,
-            uri_request_type: URIRequestType<T::AccountId>,
             uri: Vec<u8>,
+            uri_request_type: URIRequestType<T::AccountId>,
             owner_did: Vec<u8>,
             signer: MultiSigner,
             proof: MultiSignature,
@@ -636,6 +636,7 @@ pub mod pallet {
             T::AuthorizedOrigin::ensure_origin(origin)?;
 
             let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
+            Self::check_claim_type(&uri_part, &claim_type)?;
             match uri_request_type {
                 URIRequestType::Oracle { is_root } => {
                     if is_root {
@@ -713,8 +714,24 @@ where
         Default::default()
     }
 
+    fn check_claim_type(uri_part: &URIPart, claim_type: &ClaimType) -> DispatchResult {
+        match claim_type {
+            ClaimType::File => {
+                ensure!(uri_part.scheme == "urauth://".as_bytes().to_vec(), Error::<T>::BadClaim);
+                ensure!(uri_part.host == Some("file".as_bytes().to_vec()), Error::<T>::BadClaim); 
+            },
+            ClaimType::Dataset { .. } => { 
+                ensure!(uri_part.scheme == "urauth://".as_bytes().to_vec(), Error::<T>::BadClaim);
+                ensure!(uri_part.host == Some("dataset".as_bytes().to_vec()), Error::<T>::BadClaim); 
+            },
+            _ => { ensure!(uri_part.host.is_some(), Error::<T>::BadClaim); }
+        }
+        Ok(())
+    }
+
     fn check_request_type(uri_request_type: URIRequestType<T::AccountId>, claim_type: &ClaimType, raw_uri: &Vec<u8>) -> Result<URI, DispatchError> {
         let parsed_uri_part: URIPart = T::URAuthParser::parse(raw_uri, claim_type)?.into();
+        Self::check_claim_type(&parsed_uri_part, claim_type)?;
         let uri = match uri_request_type {
             URIRequestType::Oracle { is_root } => {
                 if is_root {

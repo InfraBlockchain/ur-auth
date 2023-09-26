@@ -902,7 +902,7 @@ impl<T: Config> URAuthParser<T> {
         }
         let mut is_protocol_exist: bool = false;
         for i in 0..raw_uri_bytes.len() {
-            if raw_uri_bytes[i] == b':' && raw_uri_bytes[i + 1] == b'/' && raw_uri_bytes[i + 2] == b'/' {
+            if raw_uri_bytes[i] == b':' {
                 is_protocol_exist = true;
             }
         }
@@ -1071,4 +1071,265 @@ pub mod size {
     pub const MAX_IDENTITY_INFO: u32 = 1024;
 
     pub type VerifiableCredential = BoundedVec<u8, ConstU32<MAX_IDENTITY_INFO>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock::Test;
+
+    #[test]
+    fn max_encoded_len() {
+        println!("{:?}", IdentityInfo::max_encoded_len());
+        println!("{:?}", Rule::max_encoded_len());
+        println!("{:?}", AccessRule::max_encoded_len());
+        println!(
+            "MAX URAUTH DOCUMENT SIZE is {:?} MB",
+            URAuthDoc::<AccountId32>::max_encoded_len() as f32 / 1_000_000f32
+        );
+    }
+
+    #[test]
+    fn verification_submission_update_status_works() {
+        use sp_keyring::AccountKeyring::*;
+
+        // Complete
+        let mut s1: VerificationSubmission<Test> = Default::default();
+        let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
+        s1.submit(3, (Alice.to_account_id(), h1)).unwrap();
+        let res = s1.submit(3, (Alice.to_account_id(), h1));
+        assert_eq!(
+            res,
+            Err(sp_runtime::DispatchError::Module(sp_runtime::ModuleError {
+                index: 99,
+                error: [20, 0, 0, 0],
+                message: Some("AlreadySubmitted")
+            }))
+        );
+        println!("{:?}", s1);
+
+        // Tie
+        let mut s2: VerificationSubmission<Test> = Default::default();
+        let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
+        let h2 = BlakeTwo256::hash(&2u32.to_le_bytes());
+        let h3 = BlakeTwo256::hash(&3u32.to_le_bytes());
+        let res = s2.submit(3, (Alice.to_account_id(), h1)).unwrap();
+        assert_eq!(res, VerificationSubmissionResult::InProgress);
+        let res = s2.submit(3, (Bob.to_account_id(), h2)).unwrap();
+        assert_eq!(res, VerificationSubmissionResult::InProgress);
+        let res = s2.submit(3, (Charlie.to_account_id(), h3)).unwrap();
+        assert_eq!(res, VerificationSubmissionResult::Tie);
+
+        // 1 member and submit
+        let mut s3: VerificationSubmission<Test> = Default::default();
+        let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
+        let res = s3.submit(1, (Alice.to_account_id(), h1)).unwrap();
+        assert_eq!(res, VerificationSubmissionResult::Complete);
+    }
+
+    #[test]
+    fn verification_submission_dynamic_threshold_works() {
+        let mut submission: VerificationSubmission<Test> = Default::default();
+        submission.update_threshold(1);
+        assert_eq!(submission.threshold, 1);
+        submission.update_threshold(2);
+        assert_eq!(submission.threshold, 2);
+        submission.update_threshold(3);
+        assert_eq!(submission.threshold, 2);
+        submission.update_threshold(4);
+        assert_eq!(submission.threshold, 3);
+        submission.update_threshold(5);
+        assert_eq!(submission.threshold, 3);
+    }
+
+    // cargo t -p pallet-urauth --lib -- types::tests::deconstruct_works --exact --nocapture 
+    #[test]
+    fn parse_works() {
+        // URI with length less than minimum should fail
+        assert!(URAuthParser::<Test>::try_parse(&"in".as_bytes().to_vec(), &ClaimType::WebsiteDomain).is_err());
+
+        // Full URI with domain
+        let raw_uri = "https://sub2.sub1.instagram.com/user1/feed".as_bytes().to_vec();
+        let uri_part = URAuthParser::<Test>::try_parse(
+            &raw_uri,
+            &ClaimType::WebServiceAccount
+        ).unwrap();
+        assert_eq!(uri_part.scheme, "https://".as_bytes().to_vec());
+        assert_eq!(uri_part.host, Some("instagram.com".as_bytes().to_vec()));
+        assert_eq!(uri_part.sub_domain, Some("sub2.sub1.".as_bytes().to_vec()));
+        assert_eq!(uri_part.path, Some("/user1/feed".as_bytes().to_vec()));
+
+        // URI without scheme. Default is 'https://'
+        let raw_uri = "instagram.com/user1/feed".as_bytes().to_vec();
+        let uri_part = URAuthParser::<Test>::try_parse(
+            &raw_uri,
+            &ClaimType::WebServiceAccount
+        ).unwrap();
+        assert_eq!(uri_part.scheme, "https://".as_bytes().to_vec());
+        assert_eq!(uri_part.host, Some("instagram.com".as_bytes().to_vec()));
+        assert_eq!(uri_part.sub_domain, None);
+        assert_eq!(uri_part.path, Some("/user1/feed".as_bytes().to_vec()));
+
+        // Full URI related to 'file' or 'dataset'
+        let raw_uri = "urauth://file/cid".as_bytes().to_vec();
+        let uri_part = URAuthParser::<Test>::try_parse(
+            &raw_uri,
+            &ClaimType::File
+        ).unwrap();
+        assert_eq!(uri_part.scheme, "urauth://".as_bytes().to_vec());
+        assert_eq!(uri_part.host, Some("file".as_bytes().to_vec()));
+        assert_eq!(uri_part.sub_domain, None);
+        assert_eq!(uri_part.path, Some("/cid".as_bytes().to_vec()));
+
+        // Partial URI related to 'file' or 'dataset'. 
+        // Scheme will be set to 'urauth://'
+        let raw_uri = "file/cid".as_bytes().to_vec();
+        let uri_part = URAuthParser::<Test>::try_parse(
+            &raw_uri,
+            &ClaimType::File
+        ).unwrap();
+        assert_eq!(uri_part.scheme, "urauth://".as_bytes().to_vec());
+        assert_eq!(uri_part.host, Some("file".as_bytes().to_vec()));
+        assert_eq!(uri_part.sub_domain, None);
+        assert_eq!(uri_part.path, Some("/cid".as_bytes().to_vec()));
+    }
+
+    // cargo t -p pallet-urauth --lib -- tests::parser_works --exact --nocapture 
+    #[test]
+    fn parser_works() {
+
+        assert_eq!(is_root_domain("http://instagram.com", ClaimType::WebServiceAccount), true);
+        assert_eq!(is_root_domain("https://instagram.com", ClaimType::WebServiceAccount), true);
+        assert_eq!(is_root_domain("https://www.instagram.com", ClaimType::WebServiceAccount), true);
+        assert_eq!(is_root_domain("https://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
+        assert_eq!(is_root_domain("ftp://www.instagram.com", ClaimType::WebServiceAccount), true);
+        assert_eq!(is_root_domain("ftp://instagram.com", ClaimType::WebServiceAccount), true);
+        assert_eq!(is_root_domain("ftp://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
+        assert_eq!(is_root_domain("smtp://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
+        assert_eq!(is_root_domain("www.instagram.com", ClaimType::WebServiceAccount), true);
+        assert_eq!(is_root_domain("sub1.instagram.com", ClaimType::WebServiceAccount), false);
+        assert_eq!(is_root_domain("urauth://file/", ClaimType::File), true);
+    }
+
+    fn is_root_domain(uri: &str, claim_type: ClaimType) -> bool {
+        URAuthParser::<Test>::try_parse(&uri.as_bytes().to_vec(), &claim_type)
+            .unwrap()
+            .is_root()
+    }
+
+    // cargo t -p pallet-urauth --lib -- types::tests::uri_part_eq_works --exact --nocapture 
+    #[test]
+    fn uri_part_eq_works() {
+        let uri_part1 = URIPart::new(
+            "https://".into(),
+            None,
+            Some("instagram.com".into()),
+            None
+        );
+        let uri_part2 = URIPart::new(
+            "https://".into(),
+            None,
+            Some("instagram.com".into()),
+            None
+        );
+        assert!(uri_part1 == uri_part2);
+        let uri_part3 = URIPart::new(
+            "https://".into(),
+            None,
+            Some("instagram.com".into()),
+            Some("/coco".into())
+        );
+        let uri_part4 = URIPart::new(
+            "https://".into(),
+            None,
+            Some("instagram.com".into()),
+            Some("/coco/1/2/3".into())
+        );
+        let uri_part_any_path = URIPart::new(
+            "https://".into(),
+            None,
+            Some("instagram.com".into()),
+            Some("/*".into())
+        );
+        assert!(uri_part3 == uri_part_any_path);
+        assert!(uri_part4 == uri_part_any_path);
+    }
+
+    fn find_json_value(
+        json_object: lite_json::JsonObject,
+        field_name: &str,
+        sub_field: Option<&str>,
+    ) -> Option<Vec<u8>> {
+        let sub = sub_field.map_or("".into(), |s| s);
+        let (_, json_value) = json_object
+            .iter()
+            .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
+            .unwrap();
+        match json_value {
+            lite_json::JsonValue::String(v) => Some(v.iter().map(|c| *c as u8).collect::<Vec<u8>>()),
+            lite_json::JsonValue::Object(v) => find_json_value(v.clone(), sub, None),
+            _ => None,
+        }
+    }
+    
+    fn account_id_from_did_raw(mut raw: Vec<u8>) -> AccountId32 {
+        let actual_owner_did: Vec<u8> = raw.drain(raw.len() - 48..raw.len()).collect();
+        let mut output = bs58::decode(actual_owner_did).into_vec().unwrap();
+                                        let temp: Vec<u8> = output.drain(1..33).collect();
+        let mut raw_account_id = [0u8; 32];
+        let buf = &temp[..raw_account_id.len()];
+        raw_account_id.copy_from_slice(buf);
+        raw_account_id.into()
+    }
+    
+    #[test]
+    fn json_parse_works() {
+        use lite_json::{json_parser::parse_json, JsonValue};
+    
+        let json_string = r#"
+            {
+                "domain" : "website1.com",
+                "adminDID" : "did:infra:ua:5DfhGyQdFobKM8NsWvEeAKk5EQQgYe9AydgJ7rMB6E1EqRzV",
+                "challenge" : "__random_challenge_value__",
+                "timestamp": "2023-07-28T10:17:21Z",
+                "proof": {
+                    "type": "Ed25519Signature2020",
+                    "created": "2023-07-28T17:29:31Z",
+                    "verificationMethod": "did:infra:ua:i3jr3...qW3dt#key-1",
+                    "proofPurpose": "assertionMethod",
+                    "proofValue": "gweEDz58DAdFfa9.....CrfFPP2oumHKtz"
+                }
+            } 
+        "#;
+    
+        let json_data = parse_json(json_string).expect("Invalid!");
+        let mut domain: Vec<u8> = vec![];
+        let mut admin_did: Vec<u8> = vec![];
+        let mut challenge: Vec<u8> = vec![];
+        let mut timestamp: Vec<u8> = vec![];
+        let mut proof_type: Vec<u8> = vec![];
+        let mut proof: Vec<u8> = vec![];
+    
+        match json_data {
+            JsonValue::Object(obj_value) => {
+                domain = find_json_value(obj_value.clone(), "domain", None).unwrap();
+                admin_did = find_json_value(obj_value.clone(), "adminDID", None).unwrap();
+                challenge = find_json_value(obj_value.clone(), "challenge", None).unwrap();
+                timestamp = find_json_value(obj_value.clone(), "timestamp", None).unwrap();
+                proof_type = find_json_value(obj_value.clone(), "proof", Some("type")).unwrap();
+                proof = find_json_value(obj_value.clone(), "proof".into(), Some("proofValue")).unwrap();
+            }
+            _ => {}
+        }
+        assert_eq!(domain, "website1.com".as_bytes().to_vec());
+        assert_eq!(admin_did, "did:infra:ua:5DfhGyQdFobKM8NsWvEeAKk5EQQgYe9AydgJ7rMB6E1EqRzV"
+            .as_bytes()
+            .to_vec());
+        assert_eq!(challenge, "__random_challenge_value__".as_bytes().to_vec());
+        assert_eq!(timestamp, "2023-07-28T10:17:21Z".as_bytes().to_vec());
+        assert_eq!(proof_type, "Ed25519Signature2020".as_bytes().to_vec());
+        assert_eq!(proof, "gweEDz58DAdFfa9.....CrfFPP2oumHKtz".as_bytes().to_vec());
+        let account_id32 = account_id_from_did_raw(admin_did);
+        println!("AccountId32 => {:?}", account_id32);
+    }
 }

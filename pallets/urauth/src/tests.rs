@@ -2,139 +2,10 @@ pub use crate::{self as pallet_urauth, mock::*, Event as URAuthEvent, *};
 
 use frame_support::{assert_noop, assert_ok};
 use sp_keyring::AccountKeyring::*;
-use sp_runtime::{traits::BlakeTwo256, AccountId32, MultiSigner};
-
-fn find_json_value(
-    json_object: lite_json::JsonObject,
-    field_name: &str,
-    sub_field: Option<&str>,
-) -> Option<Vec<u8>> {
-    let sub = sub_field.map_or("".into(), |s| s);
-    let (_, json_value) = json_object
-        .iter()
-        .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
-        .unwrap();
-    match json_value {
-        lite_json::JsonValue::String(v) => Some(v.iter().map(|c| *c as u8).collect::<Vec<u8>>()),
-        lite_json::JsonValue::Object(v) => find_json_value(v.clone(), sub, None),
-        _ => None,
-    }
-}
-
-fn account_id_from_did_raw(mut raw: Vec<u8>) -> AccountId32 {
-    let actual_owner_did: Vec<u8> = raw.drain(raw.len() - 48..raw.len()).collect();
-    let mut output = bs58::decode(actual_owner_did).into_vec().unwrap();
-                                    let temp: Vec<u8> = output.drain(1..33).collect();
-    let mut raw_account_id = [0u8; 32];
-    let buf = &temp[..raw_account_id.len()];
-    raw_account_id.copy_from_slice(buf);
-    raw_account_id.into()
-}
+use sp_runtime::{AccountId32, MultiSigner};
 
 #[test]
-fn json_parse_works() {
-    use lite_json::{json_parser::parse_json, JsonValue};
-
-    let json_string = r#"
-        {
-            "domain" : "website1.com",
-            "adminDID" : "did:infra:ua:5DfhGyQdFobKM8NsWvEeAKk5EQQgYe9AydgJ7rMB6E1EqRzV",
-            "challenge" : "__random_challenge_value__",
-            "timestamp": "2023-07-28T10:17:21Z",
-            "proof": {
-                "type": "Ed25519Signature2020",
-                "created": "2023-07-28T17:29:31Z",
-                "verificationMethod": "did:infra:ua:i3jr3...qW3dt#key-1",
-                "proofPurpose": "assertionMethod",
-                "proofValue": "gweEDz58DAdFfa9.....CrfFPP2oumHKtz"
-            }
-        } 
-	"#;
-
-    let json_data = parse_json(json_string).expect("Invalid!");
-    let mut domain: Vec<u8> = vec![];
-    let mut admin_did: Vec<u8> = vec![];
-    let mut challenge: Vec<u8> = vec![];
-    let mut timestamp: Vec<u8> = vec![];
-    let mut proof_type: Vec<u8> = vec![];
-    let mut proof: Vec<u8> = vec![];
-
-    match json_data {
-        JsonValue::Object(obj_value) => {
-            domain = find_json_value(obj_value.clone(), "domain", None).unwrap();
-            admin_did = find_json_value(obj_value.clone(), "adminDID", None).unwrap();
-            challenge = find_json_value(obj_value.clone(), "challenge", None).unwrap();
-            timestamp = find_json_value(obj_value.clone(), "timestamp", None).unwrap();
-            proof_type = find_json_value(obj_value.clone(), "proof", Some("type")).unwrap();
-            proof = find_json_value(obj_value.clone(), "proof".into(), Some("proofValue")).unwrap();
-        }
-        _ => {}
-    }
-    assert_eq!(domain, "website1.com".as_bytes().to_vec());
-    assert_eq!(admin_did, "did:infra:ua:5DfhGyQdFobKM8NsWvEeAKk5EQQgYe9AydgJ7rMB6E1EqRzV"
-        .as_bytes()
-        .to_vec());
-    assert_eq!(challenge, "__random_challenge_value__".as_bytes().to_vec());
-    assert_eq!(timestamp, "2023-07-28T10:17:21Z".as_bytes().to_vec());
-    assert_eq!(proof_type, "Ed25519Signature2020".as_bytes().to_vec());
-    assert_eq!(proof, "gweEDz58DAdFfa9.....CrfFPP2oumHKtz".as_bytes().to_vec());
-    let account_id32 = account_id_from_did_raw(admin_did);
-    println!("AccountId32 => {:?}", account_id32);
-}
-
-#[test]
-fn verification_submission_dynamic_threshold_works() {
-    let mut submission: VerificationSubmission<Test> = Default::default();
-    submission.update_threshold(1);
-    assert_eq!(submission.threshold, 1);
-    submission.update_threshold(2);
-    assert_eq!(submission.threshold, 2);
-    submission.update_threshold(3);
-    assert_eq!(submission.threshold, 2);
-    submission.update_threshold(4);
-    assert_eq!(submission.threshold, 3);
-    submission.update_threshold(5);
-    assert_eq!(submission.threshold, 3);
-}
-
-#[test]
-fn verification_submission_update_status_works() {
-    // Complete
-    let mut s1: VerificationSubmission<Test> = Default::default();
-    let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
-    s1.submit(3, (Alice.to_account_id(), h1)).unwrap();
-    let res = s1.submit(3, (Alice.to_account_id(), h1));
-    assert_eq!(
-        res,
-        Err(sp_runtime::DispatchError::Module(sp_runtime::ModuleError {
-            index: 99,
-            error: [20, 0, 0, 0],
-            message: Some("AlreadySubmitted")
-        }))
-    );
-    println!("{:?}", s1);
-
-    // Tie
-    let mut s2: VerificationSubmission<Test> = Default::default();
-    let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
-    let h2 = BlakeTwo256::hash(&2u32.to_le_bytes());
-    let h3 = BlakeTwo256::hash(&3u32.to_le_bytes());
-    let res = s2.submit(3, (Alice.to_account_id(), h1)).unwrap();
-    assert_eq!(res, VerificationSubmissionResult::InProgress);
-    let res = s2.submit(3, (Bob.to_account_id(), h2)).unwrap();
-    assert_eq!(res, VerificationSubmissionResult::InProgress);
-    let res = s2.submit(3, (Charlie.to_account_id(), h3)).unwrap();
-    assert_eq!(res, VerificationSubmissionResult::Tie);
-
-    // 1 member and submit
-    let mut s3: VerificationSubmission<Test> = Default::default();
-    let h1 = BlakeTwo256::hash(&1u32.to_le_bytes());
-    let res = s3.submit(1, (Alice.to_account_id(), h1)).unwrap();
-    assert_eq!(res, VerificationSubmissionResult::Complete);
-}
-
-#[test]
-fn urauth_request_register_ownership_works() {
+fn request_register_ownership_works() {
     let mut urauth_helper = MockURAuthHelper::<MockAccountId>::default(None, None, None, None);
     let (uri, owner_did, _, _) = urauth_helper.deconstruct_urauth_doc(None);
     let bounded_uri = urauth_helper.bounded_uri(None);
@@ -152,10 +23,10 @@ fn urauth_request_register_ownership_works() {
             RuntimeOrigin::root(), 
             ClaimType::WebsiteDomain,
             URIRequestType::Oracle { is_root: true }, 
-            "website1.com".into()
+            "https://www.website1.com".into()
         ));
 
-        assert_ok!(URAuth::urauth_request_register_ownership(
+        assert_ok!(URAuth::request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
             ClaimType::WebsiteDomain,
             "www.website1.com".as_bytes().to_vec(),
@@ -179,7 +50,7 @@ fn urauth_request_register_ownership_works() {
 
         // Different DID owner with signature should fail
         assert_noop!(
-            URAuth::urauth_request_register_ownership(
+            URAuth::request_register_ownership(
                 RuntimeOrigin::signed(Alice.to_account_id()),
                 ClaimType::WebsiteDomain,
                 uri.clone(),
@@ -202,7 +73,7 @@ fn urauth_request_register_ownership_works() {
 
         // Different URI with signature should fail
         assert_noop!(
-            URAuth::urauth_request_register_ownership(
+            URAuth::request_register_ownership(
                 RuntimeOrigin::signed(Alice.to_account_id()),
                 ClaimType::WebsiteDomain,
                 uri.clone(),
@@ -228,7 +99,7 @@ fn urauth_request_register_ownership_works() {
             ),
         );
         assert_noop!(
-            URAuth::urauth_request_register_ownership(
+            URAuth::request_register_ownership(
                 RuntimeOrigin::signed(Alice.to_account_id()),
                 ClaimType::WebsiteDomain,
                 uri.clone(),
@@ -270,7 +141,7 @@ fn verify_challenge_works() {
             Alice.to_account_id()
         ));
 
-        assert_ok!(URAuth::urauth_request_register_ownership(
+        assert_ok!(URAuth::request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
             ClaimType::WebsiteDomain,
             uri.clone(),
@@ -325,7 +196,7 @@ fn update_urauth_doc_works() {
             Alice.to_account_id()
         ));
 
-        assert_ok!(URAuth::urauth_request_register_ownership(
+        assert_ok!(URAuth::request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
             ClaimType::WebsiteDomain,
             uri.clone(),
@@ -584,7 +455,7 @@ fn verify_challenge_with_multiple_oracle_members() {
         ));
         assert!(OracleMembers::<Test>::get().len() == 3);
 
-        assert_ok!(URAuth::urauth_request_register_ownership(
+        assert_ok!(URAuth::request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
             ClaimType::WebsiteDomain,
             uri.clone(),
@@ -645,8 +516,8 @@ fn claim_file_ownership_works() {
         assert_ok!(URAuth::claim_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
             ClaimType::File,
-            URIRequestType::Any { maybe_parent_acc: Alice.to_account_id() },
             "urauth://file".into(),
+            URIRequestType::Any { maybe_parent_acc: Alice.to_account_id() },
             owner_did,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
@@ -679,8 +550,8 @@ fn register_dataset_works() {
                 name: "".into(),
                 description: "".into()
             },
+            "urauth://dataset/{CID}".into(),
             URIRequestType::Any { maybe_parent_acc: Alice.to_account_id() },
-            "urauth://file".into(),
             owner_did,
             MultiSigner::Sr25519(Alice.public()),
             request_sig,
@@ -696,146 +567,68 @@ fn register_dataset_works() {
 }
 
 #[test]
-fn max_encoded_len() {
-    println!("{:?}", IdentityInfo::max_encoded_len());
-    println!("{:?}", Rule::max_encoded_len());
-    println!("{:?}", AccessRule::max_encoded_len());
-    println!(
-        "MAX URAUTH DOCUMENT SIZE is {:?} MB",
-        URAuthDoc::<AccountId32>::max_encoded_len() as f32 / 1_000_000f32
+fn integrity_test() {
+    let mut urauth_helper = MockURAuthHelper::<AccountId32>::default(None, None, None, None);
+    let (uri, owner_did, challenge_value, timestamp) = urauth_helper.deconstruct_urauth_doc(None);
+    let bounded_uri = urauth_helper.bounded_uri(None);
+    let bounded_owner_did = urauth_helper.raw_owner_did();
+    let signer = MultiSigner::Sr25519(Alice.public());
+    let r_sig = urauth_helper.create_signature(
+        Alice,
+        ProofType::Request(
+            urauth_helper.bounded_uri(None),
+            urauth_helper.raw_owner_did(),
+        ),
     );
-}
+    let c_sig = urauth_helper.create_sr25519_signature(
+        Alice,
+        ProofType::Challenge(
+            bounded_uri.clone(),
+            bounded_owner_did.clone(),
+            challenge_value,
+            timestamp,
+        ),
+    );
+    let challenge_json =
+        urauth_helper.generate_json("Sr25519Signature2020".into(), hex::encode(c_sig));
 
-#[test]
-fn parse_string_works() {
-    use ada_url::Url;
-    use addr::parse_domain_name;
-
-    let u = Url::parse("http://sub2.sub1.instagram.com/coco/post", None)
-        .expect("bad url");
-    let host = u.host();
-    println!("Host => {:?}", host);
-    let all_path = u.pathname().split('/').collect::<Vec<&str>>();
-    let all_path = all_path.into_iter().filter(|p| p.len() != 0).collect::<Vec<&str>>();
-    println!("All path => {:?}", all_path);
-    let domain_name = parse_domain_name(u.hostname()).expect("Bad URL");
-    if domain_name.prefix().is_some() {
-        let prefix = domain_name.prefix().expect("Checked!");
-        let prefix = prefix.split(['.']).collect::<Vec<&str>>();
-        println!(" Prefix => {:?}", prefix);
-    }
-    println!("Root domain => {:?}", domain_name.root().expect("No Root"));
-}
-
-// cargo t -p pallet-urauth --lib -- tests::parser_works --exact --nocapture 
-#[test]
-fn parser_works() {
-
-    assert_eq!(is_root_domain("http://instagram.com", ClaimType::WebServiceAccount), true);
-    assert_eq!(is_root_domain("https://instagram.com", ClaimType::WebServiceAccount), true);
-    assert_eq!(is_root_domain("https://www.instagram.com", ClaimType::WebServiceAccount), true);
-    assert_eq!(is_root_domain("https://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
-    assert_eq!(is_root_domain("ftp://www.instagram.com", ClaimType::WebServiceAccount), true);
-    assert_eq!(is_root_domain("ftp://instagram.com", ClaimType::WebServiceAccount), true);
-    assert_eq!(is_root_domain("ftp://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
-    assert_eq!(is_root_domain("smtp://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
-    assert_eq!(is_root_domain("www.instagram.com", ClaimType::WebServiceAccount), true);
-    assert_eq!(is_root_domain("sub1.instagram.com", ClaimType::WebServiceAccount), false);
-    assert_eq!(is_root_domain("urauth://file/", ClaimType::WebServiceAccount), false);
-}
-
-fn is_root_domain(uri: &str, claim_type: ClaimType) -> bool {
-    let uri: String = uri.into();
-    let raw_uri: Vec<u8> = uri.clone().into();
-    let part = <URAuthParser<Test> as Parser<Test>>::parse(&raw_uri, &claim_type).unwrap();
-    part.is_root()
-}
-
-#[test]
-fn deconstruct_works() {
-    let raw_uri = "https://sub2.sub1.instagram.com/user1/feed".as_bytes().to_vec();
-    let uri_part = URAuthParser::<Test>::try_parse(
-        &raw_uri,
-        &ClaimType::WebServiceAccount
-    ).unwrap();
-    println!("{}", uri_part);
-    println!("{:?}", std::str::from_utf8(&uri_part.root().unwrap()));
-    println!("{:?}", std::str::from_utf8(&uri_part.full_uri().1));
+    let request_call = RequestCall::new(
+        RuntimeOrigin::signed(Alice.to_account_id()),
+        ClaimType::WebsiteDomain,
+        "www.website1.com".as_bytes().to_vec(),
+        URIRequestType::Oracle { is_root: true },
+        owner_did.clone(),
+        Some(urauth_helper.challenge_value()),
+        signer.clone(),
+        r_sig.clone()
+    );
+    
     new_test_ext().execute_with(|| {
-        println!("{:?}", URAuth::check_parent_owner(
-            &raw_uri, 
-            &Alice.to_account_id(), 
-            &ClaimType::WebServiceAccount
+        assert_ok!(URAuth::add_oracle_member(
+            RuntimeOrigin::root(),
+            Alice.to_account_id()
         ));
-
-        println!("{:?}", URAuth::check_parent_owner(
-            &"urauth://file/cid/alice".as_bytes().to_vec(), 
-            &Alice.to_account_id(), 
-            &ClaimType::WebServiceAccount
-        ));
-    });
-    let raw_uri = "instagram.com".as_bytes().to_vec();
-    let uri_part = URAuthParser::<Test>::try_parse(
-        &raw_uri,
-        &ClaimType::WebServiceAccount
-    ).unwrap();
-    println!("{}", uri_part);
-    println!("{:?}", std::str::from_utf8(&uri_part.root().unwrap()));
-    println!("{:?}", std::str::from_utf8(&uri_part.full_uri().1));
-}
-
-#[test]
-fn ada_parse() {
-    let url = ada_url::Url::parse("news:comp.lang.python", None).unwrap();
-    println!("{:?}", url.hostname());
-    println!("{:?}", url.pathname());
-    let url = ada_url::Url::parse("urauth://sub1.file/cid", None).unwrap();
-    println!("{:?}", url.hostname());
-    println!("{:?}", url.pathname());   
-    let url = ada_url::Url::parse("urauth://file/cid/alice", None).unwrap();
-    println!("{:?}", url.hostname());
-    println!("{:?}", url.pathname());  
-    let uri_part = <URAuthParser<Test> as Parser<Test>>::parse(&"urauth://file/cid/alice".as_bytes().to_vec(), &ClaimType::WebServiceAccount).unwrap();
-    println!("{}", uri_part);
-    println!("{:?}", std::str::from_utf8(&uri_part.full_uri().1));
-    let url = ada_url::Url::parse("urauth://dataset/cid", None).unwrap();
-    println!("{:?}", url.hostname());
-    println!("{:?}", url.pathname());
-}
-
-#[test]
-fn uri_part_eq_works() {
-    let uri_part1 = URIPart::new(
-        "https://".into(),
-        None,
-        Some("instagram.com".into()),
-        None
-    );
-    let uri_part2 = URIPart::new(
-        "https://".into(),
-        None,
-        Some("instagram.com".into()),
-        None
-    );
-    assert!(uri_part1 == uri_part2);
-    let uri_part3 = URIPart::new(
-        "https://".into(),
-        None,
-        Some("instagram.com".into()),
-        Some("/coco".into())
-    );
-    let uri_part4 = URIPart::new(
-        "https://".into(),
-        None,
-        Some("instagram.com".into()),
-        Some("/coco/1/2/3".into())
-    );
-    let uri_part_any_path = URIPart::new(
-        "https://".into(),
-        None,
-        Some("instagram.com".into()),
-        Some("/*".into())
-    );
-    assert!(uri_part3 == uri_part_any_path);
-    assert!(uri_part4 == uri_part_any_path);
+        // Request type should be 'Oracle'
+        assert_noop!(
+            request_call
+            .clone()
+            .set_request_type(URIRequestType::Any { maybe_parent_acc: Alice.to_account_id() })
+            .runtime_call(), Error::<Test>::BadClaim
+        );
+        // Domain without host should fail
+        assert_noop!(
+            request_call
+            .clone()
+            .set_uri("news:comp.infosystems".as_bytes().to_vec())
+            .runtime_call(), Error::<Test>::BadClaim
+        );
+        // URI which is not root should fail
+        assert_noop!(
+            request_call
+            .clone()
+            .set_uri("sub1.website1.com".as_bytes().to_vec())
+            .runtime_call(), Error::<Test>::NotRootURI
+        );
+        assert_ok!(request_call.runtime_call());
+    })
 }

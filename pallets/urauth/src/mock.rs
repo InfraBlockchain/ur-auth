@@ -1,5 +1,5 @@
 pub use crate::{self as pallet_urauth, *};
-use frame_support::{parameter_types, traits::{Everything, EitherOfDiverse}};
+use frame_support::{parameter_types, traits::Everything};
 use frame_system::EnsureRoot;
 use sp_core::{sr25519::Signature, H256};
 use sp_runtime::{
@@ -367,6 +367,68 @@ impl MockURAuthDocManager {
         let json_output = std::str::from_utf8(&json).unwrap();
 
         json_output.to_string()
+    }
+}
+
+#[derive(Clone)]
+pub struct RequestCall {
+    origin: RuntimeOrigin, 
+    claim_type: ClaimType, 
+    uri: Vec<u8>, 
+    request_type: URIRequestType<AccountId32>, 
+    owner_did: Vec<u8>, 
+    challenge: Option<Randomness>, 
+    signer: MultiSigner, 
+    sig: MultiSignature 
+}
+
+impl RequestCall {
+
+    pub fn new(origin: RuntimeOrigin, claim_type: ClaimType, uri: Vec<u8>, request_type: URIRequestType<AccountId32>, owner_did: Vec<u8>, challenge: Option<Randomness>, signer: MultiSigner, sig: MultiSignature) -> Self {
+        Self {
+            origin,
+            claim_type,
+            uri,
+            request_type,
+            owner_did,
+            challenge,
+            signer,
+            sig 
+        }
+    }
+
+    pub fn runtime_call(self) -> DispatchResult {
+        URAuth::request_register_ownership(self.origin, self.claim_type, self.uri, self.request_type, self.owner_did, self.challenge, self.signer, self.sig)
+    }
+    pub fn set_origin(mut self, origin: RuntimeOrigin) {
+        self.origin = origin;
+    }
+    pub fn set_claim_type(mut self, claim_type: ClaimType) {
+        self.claim_type = claim_type;
+    }
+    pub fn set_uri(mut self, uri: Vec<u8>) -> Self {
+        self.uri = uri;
+        self
+    }
+    pub fn set_request_type(mut self, request_type: URIRequestType<AccountId32>) -> Self {
+        self.request_type = request_type;
+        self
+    }
+    pub fn set_owner_did(mut self, owner_did: Vec<u8>) -> Self {
+        self.owner_did = owner_did;
+        self
+    }
+    pub fn set_challenge(mut self, challenge: Option<Randomness>) -> Self {
+        self.challenge = challenge;
+        self
+    }
+    pub fn set_signer(mut self, signer: MultiSigner) -> Self {
+        self.signer = signer;
+        self 
+    }
+    pub fn set_sig(mut self, sig: MultiSignature) -> Self {
+        self.sig = sig;
+        self
     }
 }
 
