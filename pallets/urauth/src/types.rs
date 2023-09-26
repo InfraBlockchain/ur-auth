@@ -216,16 +216,21 @@ pub struct RequestMetadata {
     pub owner_did: OwnerDID,
     pub challenge_value: Randomness,
     pub claim_type: ClaimType,
-    pub maybe_register_uri: URI
+    pub maybe_register_uri: URI,
 }
 
 impl RequestMetadata {
-    pub fn new(owner_did: OwnerDID, challenge_value: Randomness, claim_type: ClaimType, maybe_register_uri: URI) -> Self {
+    pub fn new(
+        owner_did: OwnerDID,
+        challenge_value: Randomness,
+        claim_type: ClaimType,
+        maybe_register_uri: URI,
+    ) -> Self {
         Self {
             owner_did,
             challenge_value,
             claim_type,
-            maybe_register_uri
+            maybe_register_uri,
         }
     }
 }

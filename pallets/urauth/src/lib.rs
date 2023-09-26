@@ -357,8 +357,12 @@ pub mod pallet {
                 matches!(uri_request_type, URIRequestType::Oracle { .. }),
                 Error::<T>::BadClaim
             );
-            let maybe_register_uri = Self::check_request_type(uri_request_type.clone(), &claim_type, &uri)?;
-            let bounded_uri: URI = uri.clone().try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            let maybe_register_uri =
+                Self::check_request_type(uri_request_type.clone(), &claim_type, &uri)?;
+            let bounded_uri: URI = uri
+                .clone()
+                .try_into()
+                .map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
@@ -370,7 +374,7 @@ pub mod pallet {
             ChallengeValue::<T>::insert(&bounded_uri, cv);
             Metadata::<T>::insert(
                 &bounded_uri,
-                RequestMetadata::new(bounded_owner_did, cv, claim_type, maybe_register_uri)
+                RequestMetadata::new(bounded_owner_did, cv, claim_type, maybe_register_uri),
             );
 
             Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri: bounded_uri });
@@ -875,7 +879,7 @@ where
         verification_submission: VerificationSubmission<T>,
         uri: &URI,
         owner_did: T::AccountId,
-        metadata: RequestMetadata
+        metadata: RequestMetadata,
     ) -> Result<(), DispatchError> {
         match res {
             VerificationSubmissionResult::Complete => {

@@ -51,43 +51,45 @@ fn request_register_ownership_works() {
         // Different DID owner with signature should fail
         assert_noop!(
             request_call
-            .clone()
-            .set_owner_did(urauth_helper.generate_did(BOB_SS58).as_bytes().to_vec())
-            .runtime_call(),
+                .clone()
+                .set_owner_did(urauth_helper.generate_did(BOB_SS58).as_bytes().to_vec())
+                .runtime_call(),
             Error::<Test>::BadSigner
         );
 
         // Different URI with signature should fail
         assert_noop!(
             request_call
-            .clone()
-            .set_sig(urauth_helper.create_signature(
-                Alice,
-                ProofType::Request(
-                    urauth_helper.bounded_uri(Some("www.website.com".into())),
-                    urauth_helper.raw_owner_did(),
-                ),
-            ))
-            .runtime_call(),
+                .clone()
+                .set_sig(urauth_helper.create_signature(
+                    Alice,
+                    ProofType::Request(
+                        urauth_helper.bounded_uri(Some("www.website.com".into())),
+                        urauth_helper.raw_owner_did(),
+                    ),
+                ))
+                .runtime_call(),
             Error::<Test>::BadProof
         );
 
         // Sign with different DID should fail
         assert_noop!(
             request_call
-            .set_sig(urauth_helper.create_signature(
-                Bob,
-                ProofType::Request(
-                    bounded_uri.clone(),
-                    urauth_helper
-                        .generate_did(BOB_SS58)
-                        .as_bytes()
-                        .to_vec()
-                        .try_into()
-                        .expect("Too long"),
-                ),
-            ))
-            .runtime_call(),
+                .set_sig(
+                    urauth_helper.create_signature(
+                        Bob,
+                        ProofType::Request(
+                            bounded_uri.clone(),
+                            urauth_helper
+                                .generate_did(BOB_SS58)
+                                .as_bytes()
+                                .to_vec()
+                                .try_into()
+                                .expect("Too long"),
+                        ),
+                    )
+                )
+                .runtime_call(),
             Error::<Test>::BadProof
         );
     });
@@ -626,90 +628,115 @@ fn integrity_test() {
         let urauth_doc = URAuthTree::<Test>::get(&reigstered_uri).unwrap();
         debug_doc(&urauth_doc);
         let uri = "sub2.sub1.website1.com".as_bytes().to_vec();
-        
-        // Parent should be Alice 
+
+        // Parent should be Alice
         assert_noop!(
             request_call
-            .clone()
-            .set_challenge(None)
-            .set_uri(uri.clone())
-            .set_request_type(URIRequestType::Any { maybe_parent_acc: Bob.to_account_id() })
-            .runtime_call(),
+                .clone()
+                .set_challenge(None)
+                .set_uri(uri.clone())
+                .set_request_type(URIRequestType::Any {
+                    maybe_parent_acc: Bob.to_account_id()
+                })
+                .runtime_call(),
             Error::<Test>::NotURAuthDocOwner
         );
 
         let bob_did = urauth_helper.generate_did(BOB_SS58).as_bytes().to_vec();
 
-        assert_ok!(
-            request_call
+        assert_ok!(request_call
             .clone()
             .set_challenge(None)
             .set_uri(uri.clone())
             .set_signer(Bob.into())
             .set_owner_did(bob_did.clone())
-            .set_request_type(URIRequestType::Any { maybe_parent_acc: Alice.to_account_id() })
-            .set_sig(urauth_helper.create_signature(Bob, ProofType::Request(uri.clone().try_into().unwrap(), bob_did.clone().try_into().unwrap())))
-            .runtime_call()
-        );
+            .set_request_type(URIRequestType::Any {
+                maybe_parent_acc: Alice.to_account_id()
+            })
+            .set_sig(urauth_helper.create_signature(
+                Bob,
+                ProofType::Request(
+                    uri.clone().try_into().unwrap(),
+                    bob_did.clone().try_into().unwrap()
+                )
+            ))
+            .runtime_call());
         let reigstered_uri: URI = uri.try_into().unwrap();
         let urauth_doc = URAuthTree::<Test>::get(&reigstered_uri).unwrap();
-        debug_doc(&urauth_doc); 
+        debug_doc(&urauth_doc);
 
         let uri = "website2.com/user".as_bytes().to_vec();
         // Request URI not in URIByOracle should be fail
         assert_noop!(
             request_call
-            .clone()
-            .set_request_type(URIRequestType::Oracle { is_root: false })
-            .set_uri(uri.clone())
-            .set_owner_did(bob_did.clone())
-            .set_sig(urauth_helper.create_signature(Bob, ProofType::Request(uri.clone().try_into().unwrap(), bob_did.clone().try_into().unwrap())))
-            .runtime_call(),
+                .clone()
+                .set_request_type(URIRequestType::Oracle { is_root: false })
+                .set_uri(uri.clone())
+                .set_owner_did(bob_did.clone())
+                .set_sig(urauth_helper.create_signature(
+                    Bob,
+                    ProofType::Request(
+                        uri.clone().try_into().unwrap(),
+                        bob_did.clone().try_into().unwrap()
+                    )
+                ))
+                .runtime_call(),
             Error::<Test>::BadClaim
         );
         assert_ok!(URAuth::add_uri_by_oracle(
             RuntimeOrigin::root(),
-            ClaimType::WebServiceAccount, 
-            URIRequestType::Oracle { is_root: false }, 
+            ClaimType::WebServiceAccount,
+            URIRequestType::Oracle { is_root: false },
             "website2.com/*".into()
         ));
-        assert_ok!(
-            request_call
+        assert_ok!(request_call
             .clone()
             .set_request_type(URIRequestType::Oracle { is_root: false })
             .set_uri(uri.clone())
             .set_owner_did(bob_did.clone())
             .set_signer(Bob.into())
-            .set_sig(urauth_helper.create_signature(Bob, ProofType::Request(uri.try_into().unwrap(), bob_did.clone().try_into().unwrap())))
-            .runtime_call()
-        );
+            .set_sig(urauth_helper.create_signature(
+                Bob,
+                ProofType::Request(uri.try_into().unwrap(), bob_did.clone().try_into().unwrap())
+            ))
+            .runtime_call());
         let uri = "website3.com/user".as_bytes().to_vec();
         let uri2 = "website3.com/feed/1/2/3".as_bytes().to_vec();
         assert_ok!(URAuth::add_uri_by_oracle(
             RuntimeOrigin::root(),
-            ClaimType::WebServiceAccount, 
-            URIRequestType::Oracle { is_root: false }, 
+            ClaimType::WebServiceAccount,
+            URIRequestType::Oracle { is_root: false },
             "website3.com/feed/*".into()
         ));
         assert_noop!(
             request_call
-            .clone()
-            .set_request_type(URIRequestType::Oracle { is_root: false })
-            .set_uri(uri.clone())
-            .set_owner_did(bob_did.clone())
-            .set_sig(urauth_helper.create_signature(Bob, ProofType::Request(uri.clone().try_into().unwrap(), bob_did.clone().try_into().unwrap())))
-            .runtime_call(),
+                .clone()
+                .set_request_type(URIRequestType::Oracle { is_root: false })
+                .set_uri(uri.clone())
+                .set_owner_did(bob_did.clone())
+                .set_sig(urauth_helper.create_signature(
+                    Bob,
+                    ProofType::Request(
+                        uri.clone().try_into().unwrap(),
+                        bob_did.clone().try_into().unwrap()
+                    )
+                ))
+                .runtime_call(),
             Error::<Test>::BadClaim
         );
-        assert_ok!(
-            request_call
+        assert_ok!(request_call
             .clone()
             .set_request_type(URIRequestType::Oracle { is_root: false })
             .set_uri(uri2.clone())
             .set_owner_did(bob_did.clone())
             .set_signer(Bob.into())
-            .set_sig(urauth_helper.create_signature(Bob, ProofType::Request(uri2.try_into().unwrap(), bob_did.clone().try_into().unwrap())))
-            .runtime_call()
-        );
+            .set_sig(urauth_helper.create_signature(
+                Bob,
+                ProofType::Request(
+                    uri2.try_into().unwrap(),
+                    bob_did.clone().try_into().unwrap()
+                )
+            ))
+            .runtime_call());
     })
 }
