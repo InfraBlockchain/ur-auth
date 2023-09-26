@@ -123,7 +123,9 @@ impl URIPart {
             .clone()
             .map_or("".as_bytes().to_vec(), |v| v);
         let mut path = self.path.clone().map_or("".as_bytes().to_vec(), |v| v);
-        full.append(&mut sub_domain);
+        if sub_domain != "www.".as_bytes().to_vec() {
+            full.append(&mut sub_domain);
+        }
         full.append(&mut host);
         full.append(&mut path);
         (maybe_scheme, full)
@@ -214,14 +216,16 @@ pub struct RequestMetadata {
     pub owner_did: OwnerDID,
     pub challenge_value: Randomness,
     pub claim_type: ClaimType,
+    pub maybe_register_uri: URI
 }
 
 impl RequestMetadata {
-    pub fn new(owner_did: OwnerDID, challenge_value: Randomness, claim_type: ClaimType) -> Self {
+    pub fn new(owner_did: OwnerDID, challenge_value: Randomness, claim_type: ClaimType, maybe_register_uri: URI) -> Self {
         Self {
             owner_did,
             challenge_value,
             claim_type,
+            maybe_register_uri
         }
     }
 }

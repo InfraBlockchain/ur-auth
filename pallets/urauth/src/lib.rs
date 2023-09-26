@@ -357,21 +357,20 @@ pub mod pallet {
                 matches!(uri_request_type, URIRequestType::Oracle { .. }),
                 Error::<T>::BadClaim
             );
-            let bounded_uri = Self::check_request_type(uri_request_type, &claim_type, &uri)?;
+            let maybe_register_uri = Self::check_request_type(uri_request_type.clone(), &claim_type, &uri)?;
+            let bounded_uri: URI = uri.clone().try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
-
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
             } else {
                 challenge_value.ok_or(Error::<T>::ChallengeValueNotProvided)?
             };
-
             ChallengeValue::<T>::insert(&bounded_uri, cv);
             Metadata::<T>::insert(
                 &bounded_uri,
-                RequestMetadata::new(bounded_owner_did, cv, claim_type),
+                RequestMetadata::new(bounded_owner_did, cv, claim_type, maybe_register_uri)
             );
 
             Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri: bounded_uri });
@@ -412,7 +411,7 @@ pub mod pallet {
 
             // 1. OwnerDID of URI == Challenge Value's DID
             // 2. Verify signature
-            let (owner, claim_type) = Self::try_verify_challenge_value(
+            let (owner, metadata) = Self::try_verify_challenge_value(
                 sig,
                 proof_type,
                 raw_payload,
@@ -427,7 +426,7 @@ pub mod pallet {
                 VerificationSubmission::<T>::default()
             };
             let res = vs.submit(member_count, (who, BlakeTwo256::hash(&challenge_value)))?;
-            Self::handle_verification_submission_result(&res, vs, &uri, owner, claim_type)?;
+            Self::handle_verification_submission_result(&res, vs, &uri, owner, metadata)?;
             Self::deposit_event(Event::<T>::VerificationInfo {
                 uri,
                 progress_status: res,
@@ -519,7 +518,8 @@ pub mod pallet {
                 matches!(uri_request_type, URIRequestType::Any { .. }),
                 Error::<T>::BadClaim
             );
-            let bounded_uri = Self::check_request_type(uri_request_type, &claim_type, &uri)?;
+            let maybe_register_uri = Self::check_request_type(uri_request_type, &claim_type, &uri)?;
+            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
@@ -547,7 +547,7 @@ pub mod pallet {
                         None => None,
                     };
                     DataSet::<T>::insert(
-                        &bounded_uri,
+                        &maybe_register_uri,
                         DataSetMetadata::<AnyText>::new(bounded_name, bounded_description),
                     );
                     Self::new_urauth_doc(owner, None, bounded_data_source)?
@@ -555,10 +555,10 @@ pub mod pallet {
                 _ => Self::new_urauth_doc(owner, None, None)?,
             };
 
-            URAuthTree::<T>::insert(&bounded_uri, urauth_doc.clone());
+            URAuthTree::<T>::insert(&maybe_register_uri, urauth_doc.clone());
             Self::deposit_event(Event::<T>::URAuthTreeRegistered {
                 claim_type,
-                uri: bounded_uri,
+                uri: maybe_register_uri,
                 urauth_doc,
             });
 
@@ -875,16 +875,21 @@ where
         verification_submission: VerificationSubmission<T>,
         uri: &URI,
         owner_did: T::AccountId,
-        claim_type: ClaimType,
+        metadata: RequestMetadata
     ) -> Result<(), DispatchError> {
         match res {
             VerificationSubmissionResult::Complete => {
+                let RequestMetadata {
+                    claim_type,
+                    maybe_register_uri,
+                    ..
+                } = metadata;
                 let urauth_doc = Self::new_urauth_doc(owner_did, None, None)?;
-                URAuthTree::<T>::insert(&uri, urauth_doc.clone());
+                URAuthTree::<T>::insert(&maybe_register_uri, urauth_doc.clone());
                 Self::remove_all_uri_related(uri.clone());
                 Self::deposit_event(Event::<T>::URAuthTreeRegistered {
                     claim_type,
-                    uri: uri.clone(),
+                    uri: maybe_register_uri,
                     urauth_doc,
                 })
             }
@@ -909,7 +914,7 @@ where
         uri: &URI,
         owner_did: &OwnerDID,
         challenge: Vec<u8>,
-    ) -> Result<(T::AccountId, ClaimType), DispatchError> {
+    ) -> Result<(T::AccountId, RequestMetadata), DispatchError> {
         let multi_sig = Self::raw_signature_to_multi_sig(&proof_type, &sig)?;
         let signer = Self::account_id32_from_raw_did(owner_did.to_vec())?;
         if !multi_sig.verify(&raw_payload[..], &signer) {
@@ -920,7 +925,7 @@ where
         Self::check_is_valid_owner(&uri_metadata.owner_did, &signer)
             .map_err(|_| Error::<T>::BadSigner)?;
         Self::check_challenge_value(uri, challenge)?;
-        Ok((signer, uri_metadata.claim_type))
+        Ok((signer, uri_metadata))
     }
 
     /// Check whether `owner` and `signer` are identical

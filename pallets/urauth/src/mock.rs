@@ -194,7 +194,12 @@ pub enum ProofType<Account: Encode> {
 pub struct MockProver<Account>(PhantomData<Account>);
 
 impl<Account: Encode> MockProver<Account> {
-    fn raw_payload(&mut self, proof_type: ProofType<Account>) -> Vec<u8> {
+
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+
+    fn raw_payload(&self, proof_type: ProofType<Account>) -> Vec<u8> {
         let raw = match proof_type {
             ProofType::Request(uri, owner_did) => (uri, owner_did).encode(),
             ProofType::Challenge(uri, owner_did, challenge, timestamp) => {
@@ -406,16 +411,31 @@ impl RequestCall {
     }
 
     pub fn runtime_call(self) -> DispatchResult {
-        URAuth::request_register_ownership(
-            self.origin,
-            self.claim_type,
-            self.uri,
-            self.request_type,
-            self.owner_did,
-            self.challenge,
-            self.signer,
-            self.sig,
-        )
+        match self.challenge {
+            Some(_) => {
+                URAuth::request_register_ownership(
+                    self.origin,
+                    self.claim_type,
+                    self.uri,
+                    self.request_type,
+                    self.owner_did,
+                    self.challenge,
+                    self.signer,
+                    self.sig,
+                )
+            },
+            None => {
+                URAuth::claim_ownership(
+                    self.origin, 
+                    self.claim_type, 
+                    self.uri, 
+                    self.request_type, 
+                    self.owner_did, 
+                    self.signer, 
+                    self.sig
+                )
+            }
+        }
     }
     pub fn set_origin(mut self, origin: RuntimeOrigin) {
         self.origin = origin;
@@ -445,6 +465,33 @@ impl RequestCall {
     }
     pub fn set_sig(mut self, sig: MultiSignature) -> Self {
         self.sig = sig;
+        self
+    }
+}
+
+pub struct AddURIByOracleCall {
+    pub origin: RuntimeOrigin,
+    pub claim_type: ClaimType,
+    pub request_type: URIRequestType<AccountId32>,
+    pub uri: Vec<u8>
+}
+
+impl AddURIByOracleCall {
+    pub fn runtime_call(&self) -> DispatchResult {
+        URAuth::add_uri_by_oracle(
+            self.origin.clone(), self.claim_type.clone(), self.request_type.clone(), self.uri.clone()
+        )
+    }
+    pub fn set_claim_type(mut self, claim_type: ClaimType) -> Self {
+        self.claim_type = claim_type;
+        self
+    }
+    pub fn set_request_type(mut self, request_type: URIRequestType<AccountId32>) -> Self {
+        self.request_type = request_type;
+        self
+    }
+    pub fn set_uri(mut self, uri: Vec<u8>) -> Self {
+        self.uri = uri;
         self
     }
 }
