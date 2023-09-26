@@ -372,19 +372,27 @@ impl MockURAuthDocManager {
 
 #[derive(Clone)]
 pub struct RequestCall {
-    origin: RuntimeOrigin, 
-    claim_type: ClaimType, 
-    uri: Vec<u8>, 
-    request_type: URIRequestType<AccountId32>, 
-    owner_did: Vec<u8>, 
-    challenge: Option<Randomness>, 
-    signer: MultiSigner, 
-    sig: MultiSignature 
+    origin: RuntimeOrigin,
+    claim_type: ClaimType,
+    uri: Vec<u8>,
+    request_type: URIRequestType<AccountId32>,
+    owner_did: Vec<u8>,
+    challenge: Option<Randomness>,
+    signer: MultiSigner,
+    sig: MultiSignature,
 }
 
 impl RequestCall {
-
-    pub fn new(origin: RuntimeOrigin, claim_type: ClaimType, uri: Vec<u8>, request_type: URIRequestType<AccountId32>, owner_did: Vec<u8>, challenge: Option<Randomness>, signer: MultiSigner, sig: MultiSignature) -> Self {
+    pub fn new(
+        origin: RuntimeOrigin,
+        claim_type: ClaimType,
+        uri: Vec<u8>,
+        request_type: URIRequestType<AccountId32>,
+        owner_did: Vec<u8>,
+        challenge: Option<Randomness>,
+        signer: MultiSigner,
+        sig: MultiSignature,
+    ) -> Self {
         Self {
             origin,
             claim_type,
@@ -393,12 +401,21 @@ impl RequestCall {
             owner_did,
             challenge,
             signer,
-            sig 
+            sig,
         }
     }
 
     pub fn runtime_call(self) -> DispatchResult {
-        URAuth::request_register_ownership(self.origin, self.claim_type, self.uri, self.request_type, self.owner_did, self.challenge, self.signer, self.sig)
+        URAuth::request_register_ownership(
+            self.origin,
+            self.claim_type,
+            self.uri,
+            self.request_type,
+            self.owner_did,
+            self.challenge,
+            self.signer,
+            self.sig,
+        )
     }
     pub fn set_origin(mut self, origin: RuntimeOrigin) {
         self.origin = origin;
@@ -424,7 +441,7 @@ impl RequestCall {
     }
     pub fn set_signer(mut self, signer: MultiSigner) -> Self {
         self.signer = signer;
-        self 
+        self
     }
     pub fn set_sig(mut self, sig: MultiSignature) -> Self {
         self.sig = sig;

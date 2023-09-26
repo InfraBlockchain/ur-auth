@@ -18,11 +18,10 @@ fn request_register_ownership_works() {
         ),
     );
     new_test_ext().execute_with(|| {
-
         assert_ok!(URAuth::add_uri_by_oracle(
-            RuntimeOrigin::root(), 
+            RuntimeOrigin::root(),
             ClaimType::WebsiteDomain,
-            URIRequestType::Oracle { is_root: true }, 
+            URIRequestType::Oracle { is_root: true },
             "https://www.website1.com".into()
         ));
 
@@ -517,7 +516,9 @@ fn claim_file_ownership_works() {
             RuntimeOrigin::signed(Alice.to_account_id()),
             ClaimType::File,
             "urauth://file".into(),
-            URIRequestType::Any { maybe_parent_acc: Alice.to_account_id() },
+            URIRequestType::Any {
+                maybe_parent_acc: Alice.to_account_id()
+            },
             owner_did,
             MultiSigner::Sr25519(Alice.public()),
             request_sig
@@ -551,7 +552,9 @@ fn register_dataset_works() {
                 description: "".into()
             },
             "urauth://dataset/{CID}".into(),
-            URIRequestType::Any { maybe_parent_acc: Alice.to_account_id() },
+            URIRequestType::Any {
+                maybe_parent_acc: Alice.to_account_id()
+            },
             owner_did,
             MultiSigner::Sr25519(Alice.public()),
             request_sig,
@@ -600,9 +603,9 @@ fn integrity_test() {
         owner_did.clone(),
         Some(urauth_helper.challenge_value()),
         signer.clone(),
-        r_sig.clone()
+        r_sig.clone(),
     );
-    
+
     new_test_ext().execute_with(|| {
         assert_ok!(URAuth::add_oracle_member(
             RuntimeOrigin::root(),
@@ -611,23 +614,28 @@ fn integrity_test() {
         // Request type should be 'Oracle'
         assert_noop!(
             request_call
-            .clone()
-            .set_request_type(URIRequestType::Any { maybe_parent_acc: Alice.to_account_id() })
-            .runtime_call(), Error::<Test>::BadClaim
+                .clone()
+                .set_request_type(URIRequestType::Any {
+                    maybe_parent_acc: Alice.to_account_id()
+                })
+                .runtime_call(),
+            Error::<Test>::BadClaim
         );
         // Domain without host should fail
         assert_noop!(
             request_call
-            .clone()
-            .set_uri("news:comp.infosystems".as_bytes().to_vec())
-            .runtime_call(), Error::<Test>::BadClaim
+                .clone()
+                .set_uri("news:comp.infosystems".as_bytes().to_vec())
+                .runtime_call(),
+            Error::<Test>::BadClaim
         );
         // URI which is not root should fail
         assert_noop!(
             request_call
-            .clone()
-            .set_uri("sub1.website1.com".as_bytes().to_vec())
-            .runtime_call(), Error::<Test>::NotRootURI
+                .clone()
+                .set_uri("sub1.website1.com".as_bytes().to_vec())
+                .runtime_call(),
+            Error::<Test>::NotRootURI
         );
         assert_ok!(request_call.runtime_call());
     })

@@ -1,9 +1,8 @@
-
 use super::*;
 
 use codec::{Decode, Encode, MaxEncodedLen};
-pub use size::*;
 use scale_info::TypeInfo;
+pub use size::*;
 use sp_runtime::RuntimeDebug;
 use sp_std::{collections::btree_map::BTreeMap, if_std};
 
@@ -46,13 +45,13 @@ impl PartialEq for URIPart {
         match (self.sub_domain.clone(), other.sub_domain.clone()) {
             (Some(s), Some(o_s)) => {
                 if s.len() < o_s.len() {
-                    return false
+                    return false;
                 }
                 if let Some(i) = o_s.iter().position(|s| *s == any) {
-                    if i+1 > o_s.len() {
+                    if i + 1 > o_s.len() {
                         return false;
                     }
-                    if s[i+1..o_s.len()].to_vec() != o_s[i+1..o_s.len()].to_vec() {
+                    if s[i + 1..o_s.len()].to_vec() != o_s[i + 1..o_s.len()].to_vec() {
                         return false;
                     }
                 } else {
@@ -60,23 +59,23 @@ impl PartialEq for URIPart {
                         return false;
                     }
                 }
-            },
-            (None, None) => {},
-            _ => { return false }
+            }
+            (None, None) => {}
+            _ => return false,
         }
         match (self.host.clone(), other.host.clone()) {
             (Some(s), Some(o_s)) => {
                 if s != o_s {
-                    return false
+                    return false;
                 }
-            },
-            (None, None) => {},
-            _ => { return false }
+            }
+            (None, None) => {}
+            _ => return false,
         }
         match (self.path.clone(), other.path.clone()) {
             (Some(s), Some(o_s)) => {
                 if s.len() < o_s.len() {
-                    return false
+                    return false;
                 }
                 if let Some(i) = o_s.iter().position(|s| *s == any) {
                     if s[0..i].to_vec() != o_s[0..i].to_vec() {
@@ -87,9 +86,9 @@ impl PartialEq for URIPart {
                         return false;
                     }
                 }
-            },
-            (None, None) => {},
-            _ => { return false }
+            }
+            (None, None) => {}
+            _ => return false,
         }
         true
     }
@@ -97,9 +96,9 @@ impl PartialEq for URIPart {
 
 impl URIPart {
     pub fn new(
-        scheme: Vec<u8>, 
-        sub_domain: Option<Vec<u8>>, 
-        host: Option<Vec<u8>>, 
+        scheme: Vec<u8>,
+        sub_domain: Option<Vec<u8>>,
+        host: Option<Vec<u8>>,
         path: Option<Vec<u8>>,
     ) -> Self {
         Self {
@@ -114,14 +113,15 @@ impl URIPart {
         let mut full = Vec::new();
         let mut scheme = self.scheme.clone();
         let mut maybe_scheme: Option<Vec<u8>> = None;
-        if scheme != "https://".as_bytes().to_vec() 
-            && scheme != "https://".as_bytes().to_vec() 
-        {
+        if scheme != "https://".as_bytes().to_vec() && scheme != "https://".as_bytes().to_vec() {
             full.append(&mut scheme);
             maybe_scheme = Some(scheme);
         }
         let mut host = self.host.clone().map_or("".as_bytes().to_vec(), |v| v);
-        let mut sub_domain = self.sub_domain.clone().map_or("".as_bytes().to_vec(), |v| v);
+        let mut sub_domain = self
+            .sub_domain
+            .clone()
+            .map_or("".as_bytes().to_vec(), |v| v);
         let mut path = self.path.clone().map_or("".as_bytes().to_vec(), |v| v);
         full.append(&mut sub_domain);
         full.append(&mut host);
@@ -133,8 +133,7 @@ impl URIPart {
         let mut root: Vec<u8> = Vec::new();
         let mut scheme = self.scheme.clone();
         if let Some(mut host) = self.host.clone() {
-            if scheme != "http://".as_bytes().to_vec() 
-                && scheme != "https://".as_bytes().to_vec() {
+            if scheme != "http://".as_bytes().to_vec() && scheme != "https://".as_bytes().to_vec() {
                 root.append(&mut scheme);
             }
             root.append(&mut host);
@@ -151,7 +150,7 @@ impl URIPart {
                 if sub_domain == "www.".as_bytes().to_vec() && self.path == None {
                     is_root = true;
                 }
-            },
+            }
             None => {
                 if self.path == None {
                     is_root = true;
@@ -169,8 +168,8 @@ impl std::fmt::Display for URIPart {
         let sub_domain = self.sub_domain.clone().map_or(Vec::new(), |s| s);
         let path = self.path.clone().map_or(Vec::new(), |s| s);
         write!(
-            f, 
-            "Scheme => {:?}, Sub => {:?}, Host => {:?}, Path => {:?}", 
+            f,
+            "Scheme => {:?}, Sub => {:?}, Host => {:?}, Path => {:?}",
             std::str::from_utf8(&self.scheme).unwrap(),
             std::str::from_utf8(&sub_domain).unwrap(),
             std::str::from_utf8(&host).unwrap(),
@@ -214,19 +213,15 @@ impl<BoundedString> DataSetMetadata<BoundedString> {
 pub struct RequestMetadata {
     pub owner_did: OwnerDID,
     pub challenge_value: Randomness,
-    pub claim_type: ClaimType
+    pub claim_type: ClaimType,
 }
 
 impl RequestMetadata {
-    pub fn new(
-        owner_did: OwnerDID, 
-        challenge_value: Randomness,
-        claim_type: ClaimType,
-    ) -> Self {
+    pub fn new(owner_did: OwnerDID, challenge_value: Randomness, claim_type: ClaimType) -> Self {
         Self {
             owner_did,
             challenge_value,
-            claim_type
+            claim_type,
         }
     }
 }
@@ -641,7 +636,7 @@ where
             data_source,
         }
     }
-    
+
     pub fn is_owner(&self, who: &Account) -> bool {
         self.multi_owner_did.is_owner(who)
     }
@@ -717,9 +712,9 @@ pub enum UpdateDocField<Account> {
     AccessRules(Option<Vec<AccessRule>>),
 }
 
-impl<Account> MaxEncodedLen for UpdateDocField<Account> 
-where 
-    Account: Encode
+impl<Account> MaxEncodedLen for UpdateDocField<Account>
+where
+    Account: Encode,
 {
     fn max_encoded_len() -> usize {
         AccessRule::max_encoded_len() * MAX_ACCESS_RULES
@@ -736,9 +731,9 @@ pub enum UpdateStatus<Account> {
     Available,
 }
 
-impl<Account> MaxEncodedLen for UpdateStatus<Account> 
+impl<Account> MaxEncodedLen for UpdateStatus<Account>
 where
-    Account: Encode
+    Account: Encode,
 {
     fn max_encoded_len() -> usize {
         UpdateDocField::<Account>::max_encoded_len()
@@ -875,15 +870,17 @@ impl sp_runtime::traits::Printable for UpdateDocStatusError {
 }
 
 pub trait Parser<T: Config> {
-
-    type URI; 
+    type URI;
     type Part: Clone + sp_std::fmt::Debug + PartialEq;
     type ClaimType;
     type ChallengeValue: Default;
 
     fn parse(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<Self::Part, DispatchError>;
 
-    fn parse_parent_uris(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<Vec<URI>, DispatchError>;
+    fn parse_parent_uris(
+        raw_uri: &Vec<u8>,
+        claim_type: &ClaimType,
+    ) -> Result<Vec<URI>, DispatchError>;
 
     fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
         Ok(Default::default())
@@ -891,13 +888,13 @@ pub trait Parser<T: Config> {
 }
 
 pub struct URAuthParser<T>(PhantomData<T>);
-impl<T: Config> URAuthParser<T> {   
-
+impl<T: Config> URAuthParser<T> {
     fn add_protocol_if_none(raw_uri: Vec<u8>, claim_type: &ClaimType) -> Vec<u8> {
         let mut uri: Vec<u8> = Vec::new();
         let mut raw_uri_bytes = raw_uri;
         let mut protocol_bytes = "https://".as_bytes().to_vec();
-        if matches!(claim_type, ClaimType::Dataset { .. }) || matches!(claim_type, ClaimType::File) {
+        if matches!(claim_type, ClaimType::Dataset { .. }) || matches!(claim_type, ClaimType::File)
+        {
             protocol_bytes = "urauth://".as_bytes().to_vec();
         }
         let mut is_protocol_exist: bool = false;
@@ -937,25 +934,31 @@ impl<T: Config> URAuthParser<T> {
         }
         let mut host: Option<Vec<u8>> = None;
         if url.has_hostname() {
-            let domain = addr::parse_domain_name(url.hostname())
-                .map_err(|_| Error::<T>::ErrorOnParse)?;
+            let domain =
+                addr::parse_domain_name(url.hostname()).map_err(|_| Error::<T>::ErrorOnParse)?;
             if domain.root() == None {
-                let temp_host = url.hostname().as_bytes().to_vec(); 
+                let temp_host = url.hostname().as_bytes().to_vec();
                 let host_str = sp_std::str::from_utf8(&temp_host)
                     .map_err(|_| Error::<T>::ErrorConvertToString)?;
                 if let Some(i) = host_str.clone().rfind('.') {
-                    sub_domain = Some(host_str[0..i+1].as_bytes().to_vec());
+                    sub_domain = Some(host_str[0..i + 1].as_bytes().to_vec());
                 }
                 host = Some(temp_host);
             } else {
                 if domain.prefix() != None {
-                    sub_domain = domain.prefix().map(|s| { 
+                    sub_domain = domain.prefix().map(|s| {
                         let mut bytes = s.as_bytes().to_vec();
-                        bytes.append(&mut ".".as_bytes().to_vec()); 
+                        bytes.append(&mut ".".as_bytes().to_vec());
                         bytes
                     });
                 }
-                host = Some(domain.root().ok_or(Error::<T>::ErrorOnParse)?.as_bytes().to_vec());
+                host = Some(
+                    domain
+                        .root()
+                        .ok_or(Error::<T>::ErrorOnParse)?
+                        .as_bytes()
+                        .to_vec(),
+                );
             }
         }
 
@@ -963,24 +966,29 @@ impl<T: Config> URAuthParser<T> {
     }
 
     /// Parse the given uri and will return the list of the parsed `URI`
-    fn try_parse_parent_uris(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<Vec<URI>, DispatchError> {
-        
+    fn try_parse_parent_uris(
+        raw_uri: &Vec<u8>,
+        claim_type: &ClaimType,
+    ) -> Result<Vec<URI>, DispatchError> {
         let uri_part = Self::try_parse(raw_uri, claim_type)?;
-        let mut is_root = false; 
+        let mut is_root = false;
         if uri_part.is_root() {
             is_root = true;
         }
         // Only parse if there is root. Otherwise, return `Err`
         if let Some(base) = uri_part.root() {
-            let base = sp_std::str::from_utf8(&base)
-                .map_err(|_| Error::<T>::ErrorConvertToString)?;
+            let base =
+                sp_std::str::from_utf8(&base).map_err(|_| Error::<T>::ErrorConvertToString)?;
             let (maybe_protocol, full_uri) = uri_part.full_uri();
-            let uri = sp_std::str::from_utf8(&full_uri)
-                .map_err(|_| Error::<T>::ErrorConvertToString)?;
+            let uri =
+                sp_std::str::from_utf8(&full_uri).map_err(|_| Error::<T>::ErrorConvertToString)?;
             if is_root {
-                let bounded_uri: URI = uri.as_bytes().to_vec().try_into()
+                let bounded_uri: URI = uri
+                    .as_bytes()
+                    .to_vec()
+                    .try_into()
                     .map_err(|_| Error::<T>::OverMaxSize)?;
-                return Ok(sp_std::vec![ bounded_uri ])
+                return Ok(sp_std::vec![bounded_uri]);
             }
             let mut uris: Vec<URI> = Vec::new();
             let mut parent_uri = uri.clone();
@@ -991,7 +999,11 @@ impl<T: Config> URAuthParser<T> {
                 }
                 parent_uri = &uri[0..i];
                 sp_std::if_std! { println!("{:?}", parent_uri) }
-                let bounded_uri: URI = parent_uri.as_bytes().to_vec().try_into().map_err(|_| Error::<T>::OverMaxSize)?; 
+                let bounded_uri: URI = parent_uri
+                    .as_bytes()
+                    .to_vec()
+                    .try_into()
+                    .map_err(|_| Error::<T>::OverMaxSize)?;
                 uris.push(bounded_uri);
             }
             // 2. Parse sub-domain
@@ -999,14 +1011,16 @@ impl<T: Config> URAuthParser<T> {
                 if parent_uri == base {
                     break;
                 }
-                parent_uri = &parent_uri[i+1..];
+                parent_uri = &parent_uri[i + 1..];
                 let mut parent_uri_bytes = parent_uri.as_bytes().to_vec();
                 if let Some(mut protocol) = maybe_protocol.clone() {
                     protocol.append(&mut parent_uri_bytes);
                     parent_uri_bytes = protocol;
                 }
                 sp_std::if_std! { println!("{:?}", sp_std::str::from_utf8(&parent_uri_bytes).expect("")) }
-                let bounded_uri: URI = parent_uri_bytes.try_into().map_err(|_| Error::<T>::OverMaxSize)?; 
+                let bounded_uri: URI = parent_uri_bytes
+                    .try_into()
+                    .map_err(|_| Error::<T>::OverMaxSize)?;
                 uris.push(bounded_uri);
             }
             Ok(uris)
@@ -1016,7 +1030,6 @@ impl<T: Config> URAuthParser<T> {
     }
 }
 impl<T: Config> Parser<T> for URAuthParser<T> {
-    
     type URI = URI;
     type Part = URIPart;
     type ClaimType = ClaimType;
@@ -1026,7 +1039,10 @@ impl<T: Config> Parser<T> for URAuthParser<T> {
         Self::try_parse(raw_uri, claim_type)
     }
 
-    fn parse_parent_uris(raw_uri: &Vec<u8>, claim_type: &Self::ClaimType) -> Result<Vec<Self::URI>, DispatchError> {
+    fn parse_parent_uris(
+        raw_uri: &Vec<u8>,
+        claim_type: &Self::ClaimType,
+    ) -> Result<Vec<Self::URI>, DispatchError> {
         Self::try_parse_parent_uris(raw_uri, claim_type)
     }
 }
@@ -1142,18 +1158,22 @@ mod tests {
         assert_eq!(submission.threshold, 3);
     }
 
-    // cargo t -p pallet-urauth --lib -- types::tests::deconstruct_works --exact --nocapture 
+    // cargo t -p pallet-urauth --lib -- types::tests::deconstruct_works --exact --nocapture
     #[test]
     fn parse_works() {
         // URI with length less than minimum should fail
-        assert!(URAuthParser::<Test>::try_parse(&"in".as_bytes().to_vec(), &ClaimType::WebsiteDomain).is_err());
+        assert!(URAuthParser::<Test>::try_parse(
+            &"in".as_bytes().to_vec(),
+            &ClaimType::WebsiteDomain
+        )
+        .is_err());
 
         // Full URI with domain
-        let raw_uri = "https://sub2.sub1.instagram.com/user1/feed".as_bytes().to_vec();
-        let uri_part = URAuthParser::<Test>::try_parse(
-            &raw_uri,
-            &ClaimType::WebServiceAccount
-        ).unwrap();
+        let raw_uri = "https://sub2.sub1.instagram.com/user1/feed"
+            .as_bytes()
+            .to_vec();
+        let uri_part =
+            URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::WebServiceAccount).unwrap();
         assert_eq!(uri_part.scheme, "https://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("instagram.com".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, Some("sub2.sub1.".as_bytes().to_vec()));
@@ -1161,10 +1181,8 @@ mod tests {
 
         // URI without scheme. Default is 'https://'
         let raw_uri = "instagram.com/user1/feed".as_bytes().to_vec();
-        let uri_part = URAuthParser::<Test>::try_parse(
-            &raw_uri,
-            &ClaimType::WebServiceAccount
-        ).unwrap();
+        let uri_part =
+            URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::WebServiceAccount).unwrap();
         assert_eq!(uri_part.scheme, "https://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("instagram.com".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, None);
@@ -1172,42 +1190,74 @@ mod tests {
 
         // Full URI related to 'file' or 'dataset'
         let raw_uri = "urauth://file/cid".as_bytes().to_vec();
-        let uri_part = URAuthParser::<Test>::try_parse(
-            &raw_uri,
-            &ClaimType::File
-        ).unwrap();
+        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::File).unwrap();
         assert_eq!(uri_part.scheme, "urauth://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("file".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, None);
         assert_eq!(uri_part.path, Some("/cid".as_bytes().to_vec()));
 
-        // Partial URI related to 'file' or 'dataset'. 
+        // Partial URI related to 'file' or 'dataset'.
         // Scheme will be set to 'urauth://'
         let raw_uri = "file/cid".as_bytes().to_vec();
-        let uri_part = URAuthParser::<Test>::try_parse(
-            &raw_uri,
-            &ClaimType::File
-        ).unwrap();
+        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::File).unwrap();
         assert_eq!(uri_part.scheme, "urauth://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("file".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, None);
         assert_eq!(uri_part.path, Some("/cid".as_bytes().to_vec()));
     }
 
-    // cargo t -p pallet-urauth --lib -- tests::parser_works --exact --nocapture 
+    // cargo t -p pallet-urauth --lib -- tests::parser_works --exact --nocapture
     #[test]
     fn parser_works() {
-
-        assert_eq!(is_root_domain("http://instagram.com", ClaimType::WebServiceAccount), true);
-        assert_eq!(is_root_domain("https://instagram.com", ClaimType::WebServiceAccount), true);
-        assert_eq!(is_root_domain("https://www.instagram.com", ClaimType::WebServiceAccount), true);
-        assert_eq!(is_root_domain("https://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
-        assert_eq!(is_root_domain("ftp://www.instagram.com", ClaimType::WebServiceAccount), true);
-        assert_eq!(is_root_domain("ftp://instagram.com", ClaimType::WebServiceAccount), true);
-        assert_eq!(is_root_domain("ftp://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
-        assert_eq!(is_root_domain("smtp://sub2.sub1.www.instagram.com", ClaimType::WebServiceAccount), false);
-        assert_eq!(is_root_domain("www.instagram.com", ClaimType::WebServiceAccount), true);
-        assert_eq!(is_root_domain("sub1.instagram.com", ClaimType::WebServiceAccount), false);
+        assert_eq!(
+            is_root_domain("http://instagram.com", ClaimType::WebServiceAccount),
+            true
+        );
+        assert_eq!(
+            is_root_domain("https://instagram.com", ClaimType::WebServiceAccount),
+            true
+        );
+        assert_eq!(
+            is_root_domain("https://www.instagram.com", ClaimType::WebServiceAccount),
+            true
+        );
+        assert_eq!(
+            is_root_domain(
+                "https://sub2.sub1.www.instagram.com",
+                ClaimType::WebServiceAccount
+            ),
+            false
+        );
+        assert_eq!(
+            is_root_domain("ftp://www.instagram.com", ClaimType::WebServiceAccount),
+            true
+        );
+        assert_eq!(
+            is_root_domain("ftp://instagram.com", ClaimType::WebServiceAccount),
+            true
+        );
+        assert_eq!(
+            is_root_domain(
+                "ftp://sub2.sub1.www.instagram.com",
+                ClaimType::WebServiceAccount
+            ),
+            false
+        );
+        assert_eq!(
+            is_root_domain(
+                "smtp://sub2.sub1.www.instagram.com",
+                ClaimType::WebServiceAccount
+            ),
+            false
+        );
+        assert_eq!(
+            is_root_domain("www.instagram.com", ClaimType::WebServiceAccount),
+            true
+        );
+        assert_eq!(
+            is_root_domain("sub1.instagram.com", ClaimType::WebServiceAccount),
+            false
+        );
         assert_eq!(is_root_domain("urauth://file/", ClaimType::File), true);
     }
 
@@ -1217,39 +1267,29 @@ mod tests {
             .is_root()
     }
 
-    // cargo t -p pallet-urauth --lib -- types::tests::uri_part_eq_works --exact --nocapture 
+    // cargo t -p pallet-urauth --lib -- types::tests::uri_part_eq_works --exact --nocapture
     #[test]
     fn uri_part_eq_works() {
-        let uri_part1 = URIPart::new(
-            "https://".into(),
-            None,
-            Some("instagram.com".into()),
-            None
-        );
-        let uri_part2 = URIPart::new(
-            "https://".into(),
-            None,
-            Some("instagram.com".into()),
-            None
-        );
+        let uri_part1 = URIPart::new("https://".into(), None, Some("instagram.com".into()), None);
+        let uri_part2 = URIPart::new("https://".into(), None, Some("instagram.com".into()), None);
         assert!(uri_part1 == uri_part2);
         let uri_part3 = URIPart::new(
             "https://".into(),
             None,
             Some("instagram.com".into()),
-            Some("/coco".into())
+            Some("/coco".into()),
         );
         let uri_part4 = URIPart::new(
             "https://".into(),
             None,
             Some("instagram.com".into()),
-            Some("/coco/1/2/3".into())
+            Some("/coco/1/2/3".into()),
         );
         let uri_part_any_path = URIPart::new(
             "https://".into(),
             None,
             Some("instagram.com".into()),
-            Some("/*".into())
+            Some("/*".into()),
         );
         assert!(uri_part3 == uri_part_any_path);
         assert!(uri_part4 == uri_part_any_path);
@@ -1266,26 +1306,28 @@ mod tests {
             .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
             .unwrap();
         match json_value {
-            lite_json::JsonValue::String(v) => Some(v.iter().map(|c| *c as u8).collect::<Vec<u8>>()),
+            lite_json::JsonValue::String(v) => {
+                Some(v.iter().map(|c| *c as u8).collect::<Vec<u8>>())
+            }
             lite_json::JsonValue::Object(v) => find_json_value(v.clone(), sub, None),
             _ => None,
         }
     }
-    
+
     fn account_id_from_did_raw(mut raw: Vec<u8>) -> AccountId32 {
         let actual_owner_did: Vec<u8> = raw.drain(raw.len() - 48..raw.len()).collect();
         let mut output = bs58::decode(actual_owner_did).into_vec().unwrap();
-                                        let temp: Vec<u8> = output.drain(1..33).collect();
+        let temp: Vec<u8> = output.drain(1..33).collect();
         let mut raw_account_id = [0u8; 32];
         let buf = &temp[..raw_account_id.len()];
         raw_account_id.copy_from_slice(buf);
         raw_account_id.into()
     }
-    
+
     #[test]
     fn json_parse_works() {
         use lite_json::{json_parser::parse_json, JsonValue};
-    
+
         let json_string = r#"
             {
                 "domain" : "website1.com",
@@ -1301,7 +1343,7 @@ mod tests {
                 }
             } 
         "#;
-    
+
         let json_data = parse_json(json_string).expect("Invalid!");
         let mut domain: Vec<u8> = vec![];
         let mut admin_did: Vec<u8> = vec![];
@@ -1309,7 +1351,7 @@ mod tests {
         let mut timestamp: Vec<u8> = vec![];
         let mut proof_type: Vec<u8> = vec![];
         let mut proof: Vec<u8> = vec![];
-    
+
         match json_data {
             JsonValue::Object(obj_value) => {
                 domain = find_json_value(obj_value.clone(), "domain", None).unwrap();
@@ -1317,18 +1359,25 @@ mod tests {
                 challenge = find_json_value(obj_value.clone(), "challenge", None).unwrap();
                 timestamp = find_json_value(obj_value.clone(), "timestamp", None).unwrap();
                 proof_type = find_json_value(obj_value.clone(), "proof", Some("type")).unwrap();
-                proof = find_json_value(obj_value.clone(), "proof".into(), Some("proofValue")).unwrap();
+                proof =
+                    find_json_value(obj_value.clone(), "proof".into(), Some("proofValue")).unwrap();
             }
             _ => {}
         }
         assert_eq!(domain, "website1.com".as_bytes().to_vec());
-        assert_eq!(admin_did, "did:infra:ua:5DfhGyQdFobKM8NsWvEeAKk5EQQgYe9AydgJ7rMB6E1EqRzV"
-            .as_bytes()
-            .to_vec());
+        assert_eq!(
+            admin_did,
+            "did:infra:ua:5DfhGyQdFobKM8NsWvEeAKk5EQQgYe9AydgJ7rMB6E1EqRzV"
+                .as_bytes()
+                .to_vec()
+        );
         assert_eq!(challenge, "__random_challenge_value__".as_bytes().to_vec());
         assert_eq!(timestamp, "2023-07-28T10:17:21Z".as_bytes().to_vec());
         assert_eq!(proof_type, "Ed25519Signature2020".as_bytes().to_vec());
-        assert_eq!(proof, "gweEDz58DAdFfa9.....CrfFPP2oumHKtz".as_bytes().to_vec());
+        assert_eq!(
+            proof,
+            "gweEDz58DAdFfa9.....CrfFPP2oumHKtz".as_bytes().to_vec()
+        );
         let account_id32 = account_id_from_did_raw(admin_did);
         println!("AccountId32 => {:?}", account_id32);
     }
