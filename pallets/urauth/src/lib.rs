@@ -16,7 +16,7 @@ use sp_runtime::{
     traits::{BlakeTwo256, IdentifyAccount, Verify},
     AccountId32, MultiSignature, MultiSigner,
 };
-use sp_std::vec::Vec;
+use sp_std::{vec::Vec, if_std};
 use xcm::latest::MultiAsset;
 
 pub use pallet::*;
@@ -308,6 +308,8 @@ pub mod pallet {
         URAuthTreeNotRegistered,
         /// Oracle node has voted more than once
         AlreadySubmitted,
+        /// Given URI has already registered on `URAuthTree`.
+        AlreadyRegistered,
         /// When trying to add oracle member more than `T::MaxOracleMembers`
         MaxOracleMembers,
         /// When trying to update different field on `UpdateInProgress` field
@@ -359,6 +361,7 @@ pub mod pallet {
             );
             let maybe_register_uri =
                 Self::check_request_type(uri_request_type.clone(), &claim_type, &uri)?;
+            ensure!(URAuthTree::<T>::get(&maybe_register_uri).is_none(), Error::<T>::AlreadyRegistered);
             let bounded_uri: URI = uri
                 .clone()
                 .try_into()
@@ -523,13 +526,13 @@ pub mod pallet {
                 Error::<T>::BadClaim
             );
             let maybe_register_uri = Self::check_request_type(uri_request_type, &claim_type, &uri)?;
+            ensure!(URAuthTree::<T>::get(&maybe_register_uri).is_none(), Error::<T>::AlreadyRegistered);
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
-            // ToDo: Check that raw_url is not base
             let urauth_doc = match claim_type.clone() {
                 ClaimType::Dataset {
                     data_source,
@@ -647,7 +650,7 @@ pub mod pallet {
             match uri_request_type {
                 URIRequestType::Oracle { is_root } => {
                     if is_root {
-                        ensure!(uri_part.is_root(), Error::<T>::NotRootURI);
+                        ensure!(uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
                     }
                 }
                 _ => return Err(Error::<T>::BadRequest.into()),
@@ -766,11 +769,12 @@ where
         raw_uri: &Vec<u8>,
     ) -> Result<URI, DispatchError> {
         let parsed_uri_part: URIPart = T::URAuthParser::parse(raw_uri, claim_type)?.into();
+        if_std! { println!("{}", parsed_uri_part )}
         Self::check_claim_type(&parsed_uri_part, claim_type)?;
         let uri = match uri_request_type {
             URIRequestType::Oracle { is_root } => {
                 if is_root {
-                    ensure!(parsed_uri_part.is_root(), Error::<T>::NotRootURI);
+                    ensure!(parsed_uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
                     let (_, root_uri) = parsed_uri_part.full_uri();
                     root_uri
                 } else {
@@ -789,9 +793,15 @@ where
                     }
                 }
             }
-            URIRequestType::Any { maybe_parent_acc } => {
-                Self::check_parent_owner(raw_uri, &maybe_parent_acc, &claim_type)?;
-                raw_uri.clone()
+            URIRequestType::Any { is_root, maybe_parent_acc } => {
+                if is_root {
+                    ensure!(parsed_uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
+                    let (_, root_uri) = parsed_uri_part.full_uri();
+                    root_uri
+                } else {
+                    Self::check_parent_owner(raw_uri, &maybe_parent_acc.ok_or(Error::<T>::BadClaim)?, &claim_type)?;
+                    raw_uri.clone()
+                }
             }
         };
         Ok(uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?)

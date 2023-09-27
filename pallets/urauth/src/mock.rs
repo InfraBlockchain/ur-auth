@@ -432,11 +432,13 @@ impl RequestCall {
             ),
         }
     }
-    pub fn set_origin(mut self, origin: RuntimeOrigin) {
+    pub fn set_origin(mut self, origin: RuntimeOrigin) -> Self {
         self.origin = origin;
+        self
     }
-    pub fn set_claim_type(mut self, claim_type: ClaimType) {
+    pub fn set_claim_type(mut self, claim_type: ClaimType) -> Self {
         self.claim_type = claim_type;
+        self
     }
     pub fn set_uri(mut self, uri: Vec<u8>) -> Self {
         self.uri = uri;
