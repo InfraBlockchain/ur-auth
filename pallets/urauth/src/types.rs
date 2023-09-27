@@ -22,8 +22,13 @@ pub type ClaimTypeFor<T> = <<T as Config>::URAuthParser as Parser<T>>::ClaimType
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 pub enum URIRequestType<Account> {
-    Oracle { is_root: bool },
-    Any { is_root: bool, maybe_parent_acc: Option<Account> },
+    Oracle {
+        is_root: bool,
+    },
+    Any {
+        is_root: bool,
+        maybe_parent_acc: Option<Account>,
+    },
 }
 
 #[derive(Encode, Decode, Clone, Eq, RuntimeDebug, TypeInfo)]
@@ -149,8 +154,8 @@ impl URIPart {
         let mut is_root: bool = false;
         // Root of 'File' and 'Dataset' has CID
         // e.g urauth://file/{cid}
-        if matches!(claim_type, ClaimType::File) || 
-        matches!(claim_type, ClaimType::Dataset { .. }) {
+        if matches!(claim_type, ClaimType::File) || matches!(claim_type, ClaimType::Dataset { .. })
+        {
             let mut count = 0;
             let slash = b'/';
             if let Some(path) = self.path.clone() {
@@ -910,7 +915,6 @@ pub trait Parser<T: Config> {
 
 pub struct URAuthParser<T>(PhantomData<T>);
 impl<T: Config> URAuthParser<T> {
-
     /// Find the start index of where sub-domain is started.
     /// ### Example
     /// 1. file -> None
@@ -922,8 +926,9 @@ impl<T: Config> URAuthParser<T> {
         let mut maybe_index: Option<usize> = None;
         while let Some(i) = temp.rfind('.') {
             count += 1;
-            if matches!(claim_type, ClaimType::File) || 
-            matches!(claim_type, ClaimType::Dataset { .. }) {
+            if matches!(claim_type, ClaimType::File)
+                || matches!(claim_type, ClaimType::Dataset { .. })
+            {
                 maybe_index = Some(i);
                 break;
             }
@@ -932,7 +937,7 @@ impl<T: Config> URAuthParser<T> {
                 break;
             }
             temp = &temp[0..i];
-        };
+        }
         maybe_index
     }
 
@@ -986,9 +991,11 @@ impl<T: Config> URAuthParser<T> {
             if_std! { println!("{:?}", temp)}
             if let Some(i) = sub_domain_index {
                 sub_domain = Some(temp[0..=i].as_bytes().to_vec());
-                host = Some(temp[i+1..].as_bytes().to_vec())
+                host = Some(temp[i + 1..].as_bytes().to_vec())
             } else {
-                if *claim_type == ClaimType::WebsiteDomain || *claim_type == ClaimType::WebServiceAccount {
+                if *claim_type == ClaimType::WebsiteDomain
+                    || *claim_type == ClaimType::WebServiceAccount
+                {
                     sub_domain = Some("www.".as_bytes().to_vec());
                 }
                 host = Some(temp.as_bytes().to_vec())
@@ -1240,7 +1247,10 @@ mod tests {
 
         let raw_uri = "sub2.sub1.file/cid".as_bytes().to_vec();
         let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::File).unwrap();
-        println!("{:?}", sp_std::str::from_utf8(&uri_part.host.clone().unwrap()));
+        println!(
+            "{:?}",
+            sp_std::str::from_utf8(&uri_part.host.clone().unwrap())
+        );
         assert_eq!(uri_part.scheme, "urauth://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("file".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, Some("sub2.sub1.".as_bytes().to_vec()));
@@ -1301,8 +1311,14 @@ mod tests {
         );
         assert_eq!(is_root_domain("urauth://file/", ClaimType::File), false);
         assert_eq!(is_root_domain("urauth://file/cid", ClaimType::File), true);
-        assert_eq!(is_root_domain("urauth://file/cid/1", ClaimType::File), false);
-        assert_eq!(is_root_domain("urauth://sub1.file/cid/1", ClaimType::File), false);
+        assert_eq!(
+            is_root_domain("urauth://file/cid/1", ClaimType::File),
+            false
+        );
+        assert_eq!(
+            is_root_domain("urauth://sub1.file/cid/1", ClaimType::File),
+            false
+        );
     }
 
     fn is_root_domain(uri: &str, claim_type: ClaimType) -> bool {

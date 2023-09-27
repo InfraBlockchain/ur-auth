@@ -193,7 +193,7 @@ fn update_urauth_doc_works() {
             RuntimeOrigin::signed(Alice.to_account_id()),
             challenge_value
         ));
-        
+
         let register_uri: URI = "website1.com".as_bytes().to_vec().try_into().unwrap();
         let mut urauth_doc = URAuthTree::<Test>::get(&register_uri).unwrap();
         debug_doc(&urauth_doc);
@@ -564,8 +564,11 @@ fn integrity_test() {
         debug_doc(&urauth_doc);
         let uri = "sub2.sub1.website1.com".as_bytes().to_vec();
         // Registered URI should not be requested.
-        assert_noop!(request_call.clone().runtime_call(), Error::<Test>::AlreadyRegistered);
-        
+        assert_noop!(
+            request_call.clone().runtime_call(),
+            Error::<Test>::AlreadyRegistered
+        );
+
         // Parent should be Alice
         assert_noop!(
             request_call
@@ -682,64 +685,76 @@ fn integrity_test() {
             .clone()
             .set_challenge(None)
             .set_claim_type(ClaimType::File)
-            .set_request_type(URIRequestType::Any { is_root: true, maybe_parent_acc: None })
+            .set_request_type(URIRequestType::Any {
+                is_root: true,
+                maybe_parent_acc: None
+            })
             .set_uri(uri.clone())
             .set_sig(urauth_helper.create_signature(
-                Alice, 
+                Alice,
                 ProofType::Request(
-                    uri.try_into().unwrap(), 
+                    uri.try_into().unwrap(),
                     owner_did.clone().try_into().unwrap()
                 )
             ))
-            .runtime_call()
-        );
+            .runtime_call());
         let uri = "urauth://file/cid/1".as_bytes().to_vec();
-        assert_noop!(request_call
-            .clone()
-            .set_challenge(None)
-            .set_claim_type(ClaimType::File)
-            .set_request_type(URIRequestType::Any { is_root: true, maybe_parent_acc: None })
-            .set_uri(uri.clone())
-            .set_sig(urauth_helper.create_signature(
-                Alice, 
-                ProofType::Request(
-                    uri.clone().try_into().unwrap(), 
-                    owner_did.clone().try_into().unwrap()
-                )
-            ))
-            .runtime_call(),
+        assert_noop!(
+            request_call
+                .clone()
+                .set_challenge(None)
+                .set_claim_type(ClaimType::File)
+                .set_request_type(URIRequestType::Any {
+                    is_root: true,
+                    maybe_parent_acc: None
+                })
+                .set_uri(uri.clone())
+                .set_sig(urauth_helper.create_signature(
+                    Alice,
+                    ProofType::Request(
+                        uri.clone().try_into().unwrap(),
+                        owner_did.clone().try_into().unwrap()
+                    )
+                ))
+                .runtime_call(),
             Error::<Test>::NotRootURI
         );
-        assert_noop!(request_call
-            .clone()
-            .set_challenge(None)
-            .set_claim_type(ClaimType::File)
-            .set_request_type(URIRequestType::Any { is_root: false, maybe_parent_acc: Some(Bob.to_account_id()) })
-            .set_uri(uri.clone())
-            .set_sig(urauth_helper.create_signature(
-                Alice, 
-                ProofType::Request(
-                    uri.clone().try_into().unwrap(), 
-                    owner_did.clone().try_into().unwrap()
-                )
-            ))
-            .runtime_call(),
+        assert_noop!(
+            request_call
+                .clone()
+                .set_challenge(None)
+                .set_claim_type(ClaimType::File)
+                .set_request_type(URIRequestType::Any {
+                    is_root: false,
+                    maybe_parent_acc: Some(Bob.to_account_id())
+                })
+                .set_uri(uri.clone())
+                .set_sig(urauth_helper.create_signature(
+                    Alice,
+                    ProofType::Request(
+                        uri.clone().try_into().unwrap(),
+                        owner_did.clone().try_into().unwrap()
+                    )
+                ))
+                .runtime_call(),
             Error::<Test>::NotURAuthDocOwner
         );
         assert_ok!(request_call
             .clone()
             .set_challenge(None)
             .set_claim_type(ClaimType::File)
-            .set_request_type(URIRequestType::Any { is_root: false, maybe_parent_acc: Some(Alice.to_account_id()) })
+            .set_request_type(URIRequestType::Any {
+                is_root: false,
+                maybe_parent_acc: Some(Alice.to_account_id())
+            })
             .set_uri(uri.clone())
             .set_sig(urauth_helper.create_signature(
-                Alice, 
+                Alice,
                 ProofType::Request(
-                    uri.try_into().unwrap(), 
+                    uri.try_into().unwrap(),
                     owner_did.clone().try_into().unwrap()
                 )
             ))
-            .runtime_call()
-        );
+            .runtime_call());
     })
 }

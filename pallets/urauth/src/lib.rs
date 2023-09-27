@@ -16,7 +16,7 @@ use sp_runtime::{
     traits::{BlakeTwo256, IdentifyAccount, Verify},
     AccountId32, MultiSignature, MultiSigner,
 };
-use sp_std::{vec::Vec, if_std};
+use sp_std::{if_std, vec::Vec};
 use xcm::latest::MultiAsset;
 
 pub use pallet::*;
@@ -361,7 +361,10 @@ pub mod pallet {
             );
             let maybe_register_uri =
                 Self::check_request_type(uri_request_type.clone(), &claim_type, &uri)?;
-            ensure!(URAuthTree::<T>::get(&maybe_register_uri).is_none(), Error::<T>::AlreadyRegistered);
+            ensure!(
+                URAuthTree::<T>::get(&maybe_register_uri).is_none(),
+                Error::<T>::AlreadyRegistered
+            );
             let bounded_uri: URI = uri
                 .clone()
                 .try_into()
@@ -526,7 +529,10 @@ pub mod pallet {
                 Error::<T>::BadClaim
             );
             let maybe_register_uri = Self::check_request_type(uri_request_type, &claim_type, &uri)?;
-            ensure!(URAuthTree::<T>::get(&maybe_register_uri).is_none(), Error::<T>::AlreadyRegistered);
+            ensure!(
+                URAuthTree::<T>::get(&maybe_register_uri).is_none(),
+                Error::<T>::AlreadyRegistered
+            );
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
@@ -793,13 +799,20 @@ where
                     }
                 }
             }
-            URIRequestType::Any { is_root, maybe_parent_acc } => {
+            URIRequestType::Any {
+                is_root,
+                maybe_parent_acc,
+            } => {
                 if is_root {
                     ensure!(parsed_uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
                     let (_, root_uri) = parsed_uri_part.full_uri();
                     root_uri
                 } else {
-                    Self::check_parent_owner(raw_uri, &maybe_parent_acc.ok_or(Error::<T>::BadClaim)?, &claim_type)?;
+                    Self::check_parent_owner(
+                        raw_uri,
+                        &maybe_parent_acc.ok_or(Error::<T>::BadClaim)?,
+                        &claim_type,
+                    )?;
                     raw_uri.clone()
                 }
             }
