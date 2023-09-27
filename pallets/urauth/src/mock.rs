@@ -79,6 +79,8 @@ impl pallet_urauth::Config for Test {
     type URAuthParser = URAuthParser<Self>;
     type MaxOracleMembers = MaxOracleMembers;
     type MaxURIByOracle = ConstU32<100>;
+    type VerificationPeriod = ConstU64<3>;
+    type MaxRequest = ConstU32<100>;
     type AuthorizedOrigin = EnsureRoot<MockAccountId>;
 }
 
@@ -509,6 +511,15 @@ impl ExtBuilder {
     pub fn build_and_execute(self, test: impl FnOnce() -> ()) {
         let mut ext = self.build();
         ext.execute_with(test);
+    }
+}
+
+pub fn run_to_block(n: BlockNumberFor<Test>) {
+    while System::block_number() < n {
+        System::on_finalize(System::block_number());
+        System::set_block_number(System::block_number() + 1);
+        System::on_initialize(System::block_number());
+        <URAuth as Hooks<BlockNumberFor<Test>>>::on_initialize(System::block_number());
     }
 }
 

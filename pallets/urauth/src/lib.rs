@@ -60,6 +60,13 @@ pub mod pallet {
         #[pallet::constant]
         type MaxURIByOracle: Get<u32>;
 
+        /// Period for verifying to claim ownership
+        #[pallet::constant]
+        type VerificationPeriod: Get<BlockNumberFor<Self>>;
+
+        #[pallet::constant]
+        type MaxRequest: Get<u32>;
+
         /// The origin which may be used within _authorized_ call.
         /// **Root** can always do this.
         type AuthorizedOrigin: EnsureOrigin<Self::RuntimeOrigin>;
@@ -93,6 +100,9 @@ pub mod pallet {
     /// URIMetadata
     #[pallet::storage]
     pub type Metadata<T: Config> = StorageMap<_, Twox128, URI, RequestMetadata>;
+
+    #[pallet::storage]
+    pub type RequestedURIs<T: Config> = StorageMap<_, Twox128, BlockNumberFor<T>, BoundedVec<URI, T::MaxRequest>>;
 
     #[pallet::storage]
     pub type DataSet<T: Config> = StorageMap<_, Twox128, URI, DataSetMetadata<AnyText>>;
@@ -181,6 +191,18 @@ pub mod pallet {
     /// URAuthDocCount
     #[pallet::storage]
     pub type Counter<T: Config> = StorageValue<_, URAuthDocCount, ValueQuery>;
+
+    #[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> 
+    where
+        URIFor<T>: Into<URI>,
+        URIPartFor<T>: IsType<URIPart>,
+    {
+        fn on_initialize(n: BlockNumberFor<T>) -> Weight {
+            let (r,w) = Self::handle_expired_requsted_uris(&n);
+            T::DbWeight::get().reads_writes(r, w)
+        }
+    }
 
     #[pallet::genesis_config]
     pub struct GenesisConfig<T: Config> {
@@ -312,6 +334,8 @@ pub mod pallet {
         AlreadyRegistered,
         /// When trying to add oracle member more than `T::MaxOracleMembers`
         MaxOracleMembers,
+        /// Max number of request of URI per block has been reached.
+        MaxRequest, 
         /// When trying to update different field on `UpdateInProgress` field
         UpdateInProgress,
     }
@@ -371,6 +395,7 @@ pub mod pallet {
                 .map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            Self::try_add_requested_uris(&bounded_uri)?;
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
@@ -740,6 +765,17 @@ where
         Default::default()
     }
 
+    fn try_add_requested_uris(uri: &URI) -> DispatchResult {
+        let expire = <frame_system::Pallet<T>>::block_number() + T::VerificationPeriod::get();
+        RequestedURIs::<T>::try_mutate_exists(expire, |uris| -> DispatchResult {
+            let mut new = uris.clone().map_or(Default::default(), |v| v);
+            new.try_push(uri.clone()).map_err(|_| Error::<T>::MaxRequest)?;
+            *uris = Some(new);
+            Ok(())
+        })?;
+        Ok(())
+    }
+
     fn check_claim_type(uri_part: &URIPart, claim_type: &ClaimType) -> DispatchResult {
         match claim_type {
             ClaimType::File => {
@@ -896,6 +932,20 @@ where
         Ok(())
     }
 
+    fn handle_expired_requsted_uris(n: &BlockNumberFor<T>) -> (u64, u64) {
+        let mut r: u64 = 1;
+        let mut w: u64 = 1;
+        if let Some(uris) = RequestedURIs::<T>::get(n) {
+            for uri in uris.iter() {
+                Self::remove_all_uri_related(uri);
+                r += 1;
+                w += 3;
+            }
+        }
+        RequestedURIs::<T>::remove(n); 
+        (r, w+1)
+    }
+
     /// Handle the result of _challenge value_ verification based on `VerificationSubmissionResult`
     fn handle_verification_submission_result(
         res: &VerificationSubmissionResult,
@@ -913,14 +963,14 @@ where
                 } = metadata;
                 let urauth_doc = Self::new_urauth_doc(owner_did, None, None)?;
                 URAuthTree::<T>::insert(&maybe_register_uri, urauth_doc.clone());
-                Self::remove_all_uri_related(uri.clone());
+                Self::remove_all_uri_related(&uri);
                 Self::deposit_event(Event::<T>::URAuthTreeRegistered {
                     claim_type,
                     uri: maybe_register_uri,
                     urauth_doc,
                 })
             }
-            VerificationSubmissionResult::Tie => Self::remove_all_uri_related(uri.clone()),
+            VerificationSubmissionResult::Tie => Self::remove_all_uri_related(&uri),
             VerificationSubmissionResult::InProgress => {
                 URIVerificationInfo::<T>::insert(&uri, verification_submission)
             }
@@ -1134,12 +1184,12 @@ where
     ///
     /// ## Changes
     /// `URIMetadata`, `URIVerificationInfo`, `ChallengeValue`
-    fn remove_all_uri_related(uri: URI) {
-        Metadata::<T>::remove(&uri);
-        URIVerificationInfo::<T>::remove(&uri);
-        ChallengeValue::<T>::remove(&uri);
+    fn remove_all_uri_related(uri: &URI) {
+        Metadata::<T>::remove(uri);
+        URIVerificationInfo::<T>::remove(uri);
+        ChallengeValue::<T>::remove(uri);
 
-        Self::deposit_event(Event::<T>::Removed { uri })
+        Self::deposit_event(Event::<T>::Removed { uri: uri.clone() })
     }
 
     /// Try parse the raw-json and return opaque type of

@@ -756,5 +756,17 @@ fn integrity_test() {
                 )
             ))
             .runtime_call());
+        let uri = "website4.com".as_bytes().to_vec();
+        let bounded_uri: URI = uri.clone().try_into().unwrap();
+        assert_ok!(request_call
+            .clone()
+            .set_uri(uri.clone())
+            .set_sig(urauth_helper.create_signature(Alice, ProofType::Request(bounded_uri.clone(), owner_did.try_into().unwrap())))
+            .runtime_call()
+        );
+        run_to_block(5);
+        assert!(Metadata::<Test>::get(&bounded_uri).is_none());
+        assert!(URIVerificationInfo::<Test>::get(&bounded_uri).is_none());
+        assert!(ChallengeValue::<Test>::get(&bounded_uri).is_none());
     })
 }
