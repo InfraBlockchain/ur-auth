@@ -102,7 +102,8 @@ pub mod pallet {
     pub type Metadata<T: Config> = StorageMap<_, Twox128, URI, RequestMetadata>;
 
     #[pallet::storage]
-    pub type RequestedURIs<T: Config> = StorageMap<_, Twox128, BlockNumberFor<T>, BoundedVec<URI, T::MaxRequest>>;
+    pub type RequestedURIs<T: Config> =
+        StorageMap<_, Twox128, BlockNumberFor<T>, BoundedVec<URI, T::MaxRequest>>;
 
     #[pallet::storage]
     pub type DataSet<T: Config> = StorageMap<_, Twox128, URI, DataSetMetadata<AnyText>>;
@@ -193,13 +194,13 @@ pub mod pallet {
     pub type Counter<T: Config> = StorageValue<_, URAuthDocCount, ValueQuery>;
 
     #[pallet::hooks]
-    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> 
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T>
     where
         URIFor<T>: Into<URI>,
         URIPartFor<T>: IsType<URIPart>,
     {
         fn on_initialize(n: BlockNumberFor<T>) -> Weight {
-            let (r,w) = Self::handle_expired_requsted_uris(&n);
+            let (r, w) = Self::handle_expired_requsted_uris(&n);
             T::DbWeight::get().reads_writes(r, w)
         }
     }
@@ -335,7 +336,7 @@ pub mod pallet {
         /// When trying to add oracle member more than `T::MaxOracleMembers`
         MaxOracleMembers,
         /// Max number of request of URI per block has been reached.
-        MaxRequest, 
+        MaxRequest,
         /// When trying to update different field on `UpdateInProgress` field
         UpdateInProgress,
     }
@@ -769,7 +770,8 @@ where
         let expire = <frame_system::Pallet<T>>::block_number() + T::VerificationPeriod::get();
         RequestedURIs::<T>::try_mutate_exists(expire, |uris| -> DispatchResult {
             let mut new = uris.clone().map_or(Default::default(), |v| v);
-            new.try_push(uri.clone()).map_err(|_| Error::<T>::MaxRequest)?;
+            new.try_push(uri.clone())
+                .map_err(|_| Error::<T>::MaxRequest)?;
             *uris = Some(new);
             Ok(())
         })?;
@@ -942,8 +944,8 @@ where
                 w += 3;
             }
         }
-        RequestedURIs::<T>::remove(n); 
-        (r, w+1)
+        RequestedURIs::<T>::remove(n);
+        (r, w + 1)
     }
 
     /// Handle the result of _challenge value_ verification based on `VerificationSubmissionResult`

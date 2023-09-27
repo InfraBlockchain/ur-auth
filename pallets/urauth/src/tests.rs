@@ -761,9 +761,11 @@ fn integrity_test() {
         assert_ok!(request_call
             .clone()
             .set_uri(uri.clone())
-            .set_sig(urauth_helper.create_signature(Alice, ProofType::Request(bounded_uri.clone(), owner_did.try_into().unwrap())))
-            .runtime_call()
-        );
+            .set_sig(urauth_helper.create_signature(
+                Alice,
+                ProofType::Request(bounded_uri.clone(), owner_did.try_into().unwrap())
+            ))
+            .runtime_call());
         run_to_block(5);
         assert!(Metadata::<Test>::get(&bounded_uri).is_none());
         assert!(URIVerificationInfo::<Test>::get(&bounded_uri).is_none());
