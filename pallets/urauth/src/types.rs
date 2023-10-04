@@ -20,16 +20,45 @@ pub type URIFor<T> = <<T as Config>::URAuthParser as Parser<T>>::URI;
 pub type URIPartFor<T> = <<T as Config>::URAuthParser as Parser<T>>::Part;
 pub type ClaimTypeFor<T> = <<T as Config>::URAuthParser as Parser<T>>::ClaimType;
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
-pub enum URIRequestType<Account> {
-    Oracle {
-        is_root: bool,
-    },
-    Any {
-        is_root: bool,
-        maybe_parent_acc: Option<Account>,
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub struct URIType {
+    pub is_root: bool,
+    pub is_oracle: bool,
+    pub claim_type: ClaimType,
+}
+
+impl URIType {
+
+    pub fn new(is_root: bool, is_oracle: bool, claim_type: ClaimType) -> Self {
+        Self {
+            is_root,
+            is_oracle,
+            claim_type
+        }
+    }
+
+    pub fn is_oracle(&self) -> bool {
+        self.is_oracle
+    } 
+}
+
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
+pub enum ClaimType {
+    Domain,
+    Contents {
+        data_source: Option<Vec<u8>>,
+        name: Vec<u8>,
+        description: Vec<u8>,
     },
 }
+
+impl MaxEncodedLen for ClaimType {
+    fn max_encoded_len() -> usize {
+        URI::max_encoded_len() + URI::max_encoded_len()
+    }
+}
+
+
 
 #[derive(Encode, Decode, Clone, Eq, RuntimeDebug, TypeInfo)]
 pub struct URIPart {
@@ -154,8 +183,7 @@ impl URIPart {
         let mut is_root: bool = false;
         // Root of 'File' and 'Dataset' has CID
         // e.g urauth://file/{cid}
-        if matches!(claim_type, ClaimType::File) || matches!(claim_type, ClaimType::Dataset { .. })
-        {
+        if matches!(claim_type, ClaimType::Contents { .. }) {
             let mut count = 0;
             let slash = b'/';
             if let Some(path) = self.path.clone() {
@@ -197,24 +225,6 @@ impl std::fmt::Display for URIPart {
     }
 }
 
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub enum ClaimType {
-    WebsiteDomain,
-    WebServiceAccount,
-    File,
-    Dataset {
-        data_source: Option<Vec<u8>>,
-        name: Vec<u8>,
-        description: Vec<u8>,
-    },
-}
-
-impl MaxEncodedLen for ClaimType {
-    fn max_encoded_len() -> usize {
-        URI::max_encoded_len() + URI::max_encoded_len()
-    }
-}
-
 #[derive(Encode, Decode, Clone, PartialEq, Debug, Eq, TypeInfo, MaxEncodedLen)]
 pub struct DataSetMetadata<BoundedString> {
     name: BoundedString,
@@ -228,11 +238,11 @@ impl<BoundedString> DataSetMetadata<BoundedString> {
 }
 
 /// Metadata for verifying challenge value
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub struct RequestMetadata {
     pub owner_did: OwnerDID,
     pub challenge_value: Randomness,
-    pub claim_type: ClaimType,
+    pub uri_type: URIType,
     pub maybe_register_uri: URI,
 }
 
@@ -240,13 +250,13 @@ impl RequestMetadata {
     pub fn new(
         owner_did: OwnerDID,
         challenge_value: Randomness,
-        claim_type: ClaimType,
+        uri_type: URIType,
         maybe_register_uri: URI,
     ) -> Self {
         Self {
             owner_did,
             challenge_value,
-            claim_type,
+            uri_type,
             maybe_register_uri,
         }
     }
@@ -926,9 +936,7 @@ impl<T: Config> URAuthParser<T> {
         let mut maybe_index: Option<usize> = None;
         while let Some(i) = temp.rfind('.') {
             count += 1;
-            if matches!(claim_type, ClaimType::File)
-                || matches!(claim_type, ClaimType::Dataset { .. })
-            {
+            if matches!(claim_type, ClaimType::Contents { .. }) {
                 maybe_index = Some(i);
                 break;
             }
@@ -945,8 +953,7 @@ impl<T: Config> URAuthParser<T> {
         let mut uri: Vec<u8> = Vec::new();
         let mut raw_uri_bytes = raw_uri;
         let mut protocol_bytes = "https://".as_bytes().to_vec();
-        if matches!(claim_type, ClaimType::Dataset { .. }) || matches!(claim_type, ClaimType::File)
-        {
+        if matches!(claim_type, ClaimType::Contents { .. }) {
             protocol_bytes = "urauth://".as_bytes().to_vec();
         }
         let mut is_protocol_exist: bool = false;
@@ -993,9 +1000,7 @@ impl<T: Config> URAuthParser<T> {
                 sub_domain = Some(temp[0..=i].as_bytes().to_vec());
                 host = Some(temp[i + 1..].as_bytes().to_vec())
             } else {
-                if *claim_type == ClaimType::WebsiteDomain
-                    || *claim_type == ClaimType::WebServiceAccount
-                {
+                if *claim_type == ClaimType::Domain {
                     sub_domain = Some("www.".as_bytes().to_vec());
                 }
                 host = Some(temp.as_bytes().to_vec())
@@ -1204,7 +1209,7 @@ mod tests {
         // URI with length less than minimum should fail
         assert!(URAuthParser::<Test>::try_parse(
             &"in".as_bytes().to_vec(),
-            &ClaimType::WebsiteDomain
+            &ClaimType::Domain
         )
         .is_err());
 
@@ -1213,7 +1218,7 @@ mod tests {
             .as_bytes()
             .to_vec();
         let uri_part =
-            URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::WebServiceAccount).unwrap();
+            URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Domain).unwrap();
         assert_eq!(uri_part.scheme, "https://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("instagram.com".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, Some("sub2.sub1.".as_bytes().to_vec()));
@@ -1222,7 +1227,7 @@ mod tests {
         // URI without scheme. Default is 'https://'
         let raw_uri = "instagram.com/user1/feed".as_bytes().to_vec();
         let uri_part =
-            URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::WebServiceAccount).unwrap();
+            URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Domain).unwrap();
         assert_eq!(uri_part.scheme, "https://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("instagram.com".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, Some("www.".as_bytes().to_vec()));
@@ -1230,7 +1235,7 @@ mod tests {
 
         // Full URI related to 'file' or 'dataset'
         let raw_uri = "urauth://file/cid".as_bytes().to_vec();
-        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::File).unwrap();
+        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }).unwrap();
         assert_eq!(uri_part.scheme, "urauth://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("file".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, None);
@@ -1239,14 +1244,14 @@ mod tests {
         // Partial URI related to 'file' or 'dataset'.
         // Scheme is set to 'urauth://'
         let raw_uri = "file/cid".as_bytes().to_vec();
-        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::File).unwrap();
+        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }).unwrap();
         assert_eq!(uri_part.scheme, "urauth://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("file".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, None);
         assert_eq!(uri_part.path, Some("/cid".as_bytes().to_vec()));
 
         let raw_uri = "sub2.sub1.file/cid".as_bytes().to_vec();
-        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::File).unwrap();
+        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }).unwrap();
         println!(
             "{:?}",
             sp_std::str::from_utf8(&uri_part.host.clone().unwrap())
@@ -1261,62 +1266,62 @@ mod tests {
     #[test]
     fn parser_works() {
         assert_eq!(
-            is_root_domain("http://instagram.com", ClaimType::WebServiceAccount),
+            is_root_domain("http://instagram.com", ClaimType::Domain),
             true
         );
         assert_eq!(
-            is_root_domain("https://instagram.com", ClaimType::WebServiceAccount),
+            is_root_domain("https://instagram.com", ClaimType::Domain),
             true
         );
         assert_eq!(
-            is_root_domain("https://www.instagram.com", ClaimType::WebServiceAccount),
+            is_root_domain("https://www.instagram.com", ClaimType::Domain),
             true
         );
         assert_eq!(
             is_root_domain(
                 "https://sub2.sub1.www.instagram.com",
-                ClaimType::WebServiceAccount
+                ClaimType::Domain
             ),
             false
         );
         assert_eq!(
-            is_root_domain("ftp://www.instagram.com", ClaimType::WebServiceAccount),
+            is_root_domain("ftp://www.instagram.com", ClaimType::Domain),
             true
         );
         assert_eq!(
-            is_root_domain("ftp://instagram.com", ClaimType::WebServiceAccount),
+            is_root_domain("ftp://instagram.com", ClaimType::Domain),
             true
         );
         assert_eq!(
             is_root_domain(
                 "ftp://sub2.sub1.www.instagram.com",
-                ClaimType::WebServiceAccount
+                ClaimType::Domain
             ),
             false
         );
         assert_eq!(
             is_root_domain(
                 "smtp://sub2.sub1.www.instagram.com",
-                ClaimType::WebServiceAccount
+                ClaimType::Domain
             ),
             false
         );
         assert_eq!(
-            is_root_domain("www.instagram.com", ClaimType::WebServiceAccount),
+            is_root_domain("www.instagram.com", ClaimType::Domain),
             true
         );
         assert_eq!(
-            is_root_domain("sub1.instagram.com", ClaimType::WebServiceAccount),
+            is_root_domain("sub1.instagram.com", ClaimType::Domain),
             false
         );
-        assert_eq!(is_root_domain("urauth://file/", ClaimType::File), false);
-        assert_eq!(is_root_domain("urauth://file/cid", ClaimType::File), true);
+        assert_eq!(is_root_domain("urauth://file/", ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }), false);
+        assert_eq!(is_root_domain("urauth://file/cid", ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }), true);
         assert_eq!(
-            is_root_domain("urauth://file/cid/1", ClaimType::File),
+            is_root_domain("urauth://file/cid/1", ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }),
             false
         );
         assert_eq!(
-            is_root_domain("urauth://sub1.file/cid/1", ClaimType::File),
+            is_root_domain("urauth://sub1.file/cid/1", ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }),
             false
         );
     }

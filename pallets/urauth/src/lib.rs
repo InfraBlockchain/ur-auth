@@ -16,7 +16,7 @@ use sp_runtime::{
     traits::{BlakeTwo256, IdentifyAccount, Verify},
     AccountId32, MultiSignature, MultiSigner,
 };
-use sp_std::{if_std, vec::Vec};
+use sp_std::vec::Vec;
 use xcm::latest::MultiAsset;
 
 pub use pallet::*;
@@ -99,6 +99,7 @@ pub mod pallet {
     ///
     /// URIMetadata
     #[pallet::storage]
+    #[pallet::unbounded]
     pub type Metadata<T: Config> = StorageMap<_, Twox128, URI, RequestMetadata>;
 
     #[pallet::storage]
@@ -170,8 +171,7 @@ pub mod pallet {
 
     #[pallet::storage]
     #[pallet::unbounded]
-    pub type URIByOracle<T: Config> =
-        StorageMap<_, Blake2_128Concat, URIRequestType<T::AccountId>, Vec<URIPart>, OptionQuery>;
+    pub type URIByOracle<T: Config> = StorageValue<_, Vec<URIPart>, OptionQuery>;
 
     /// **Description:**
     ///
@@ -241,7 +241,7 @@ pub mod pallet {
         URAuthRegisterRequested { uri: URI },
         /// `URAuthDoc` is registered on `URAuthTree`.
         URAuthTreeRegistered {
-            claim_type: ClaimType,
+            uri_type: URIType,
             uri: URI,
             urauth_doc: URAuthDoc<T::AccountId>,
         },
@@ -263,12 +263,9 @@ pub mod pallet {
             update_doc_status: UpdateDocStatus<T::AccountId>,
         },
         /// List of `URIByOracle` has been added
-        URIByOracleAdded {
-            uri_part: URIPartFor<T>,
-            uri_request_type: URIRequestType<T::AccountId>,
-        },
+        URIByOracleAdded,
         /// List of `URIByOracle` has been removed
-        URIByOracleRemoved { uri_part: URIPartFor<T> },
+        URIByOracleRemoved,
         /// Request of registering URI has been removed.
         Removed { uri: URI },
     }
@@ -371,21 +368,17 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn request_register_ownership(
             origin: OriginFor<T>,
-            claim_type: ClaimType,
+            uri_type: URIType,
             uri: Vec<u8>,
-            uri_request_type: URIRequestType<T::AccountId>,
             owner_did: Vec<u8>,
             challenge_value: Option<Randomness>,
             signer: MultiSigner,
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            ensure!(
-                matches!(uri_request_type, URIRequestType::Oracle { .. }),
-                Error::<T>::BadClaim
-            );
-            let maybe_register_uri =
-                Self::check_request_type(uri_request_type.clone(), &claim_type, &uri)?;
+            ensure!(uri_type.is_oracle(), Error::<T>::BadClaim );
+            let (maybe_register_uri, should_check_owner) =
+                Self::check_uri_type(&uri_type, &uri, None)?;
             ensure!(
                 URAuthTree::<T>::get(&maybe_register_uri).is_none(),
                 Error::<T>::AlreadyRegistered
@@ -396,8 +389,7 @@ pub mod pallet {
                 .map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            Self::try_add_requested_uris(&bounded_uri)?;
-            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
+            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer, should_check_owner)?;
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
             } else {
@@ -406,7 +398,7 @@ pub mod pallet {
             ChallengeValue::<T>::insert(&bounded_uri, cv);
             Metadata::<T>::insert(
                 &bounded_uri,
-                RequestMetadata::new(bounded_owner_did, cv, claim_type, maybe_register_uri),
+                RequestMetadata::new(bounded_owner_did, cv, uri_type, maybe_register_uri),
             );
 
             Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri: bounded_uri });
@@ -541,20 +533,19 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn claim_ownership(
             origin: OriginFor<T>,
-            claim_type: ClaimType,
+            uri_type: URIType,
             uri: Vec<u8>,
-            uri_request_type: URIRequestType<T::AccountId>,
             owner_did: Vec<u8>,
             signer: MultiSigner,
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
+            ensure!(!uri_type.is_oracle(), Error::<T>::BadClaim);
 
-            ensure!(
-                matches!(uri_request_type, URIRequestType::Any { .. }),
-                Error::<T>::BadClaim
-            );
-            let maybe_register_uri = Self::check_request_type(uri_request_type, &claim_type, &uri)?;
+            let maybe_parent_acc = Self::account_id_from_source(AccountIdSource::AccountId32(
+                signer.clone().into_account(),
+            ))?;
+            let (maybe_register_uri, should_check_owner) = Self::check_uri_type(&uri_type, &uri, Some(maybe_parent_acc))?;
             ensure!(
                 URAuthTree::<T>::get(&maybe_register_uri).is_none(),
                 Error::<T>::AlreadyRegistered
@@ -562,11 +553,11 @@ pub mod pallet {
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
+            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer, should_check_owner)?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
-            let urauth_doc = match claim_type.clone() {
-                ClaimType::Dataset {
+            let urauth_doc = match uri_type.claim_type.clone() {
+                ClaimType::Contents {
                     data_source,
                     name,
                     description,
@@ -596,7 +587,7 @@ pub mod pallet {
 
             URAuthTree::<T>::insert(&maybe_register_uri, urauth_doc.clone());
             Self::deposit_event(Event::<T>::URAuthTreeRegistered {
-                claim_type,
+                uri_type,
                 uri: maybe_register_uri,
                 urauth_doc,
             });
@@ -671,24 +662,18 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn add_uri_by_oracle(
             origin: OriginFor<T>,
-            claim_type: ClaimType,
-            uri_request_type: URIRequestType<T::AccountId>,
+            uri_type: URIType,
             uri: Vec<u8>,
         ) -> DispatchResult {
             T::AuthorizedOrigin::ensure_origin(origin)?;
-
+            let URIType { is_root, is_oracle, claim_type } = uri_type;
             let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
             Self::check_claim_type(&uri_part, &claim_type)?;
-            match uri_request_type {
-                URIRequestType::Oracle { is_root } => {
-                    if is_root {
-                        ensure!(uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
-                    }
-                }
-                _ => return Err(Error::<T>::BadRequest.into()),
+            ensure!(is_oracle, Error::<T>::BadRequest);
+            if is_root {
+                ensure!(uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
             }
             URIByOracle::<T>::try_mutate_exists(
-                &uri_request_type,
                 |uri_parts| -> DispatchResult {
                     let mut new = uri_parts.clone().map_or(Vec::new(), |v| v.to_vec());
                     new.push(uri_part.clone());
@@ -696,10 +681,7 @@ pub mod pallet {
                     Ok(())
                 },
             )?;
-            Self::deposit_event(Event::<T>::URIByOracleAdded {
-                uri_part: uri_part.into(),
-                uri_request_type,
-            });
+            Self::deposit_event(Event::<T>::URIByOracleAdded);
             Ok(())
         }
 
@@ -708,7 +690,6 @@ pub mod pallet {
         pub fn remove_uri_by_oracle(
             origin: OriginFor<T>,
             claim_type: ClaimType,
-            uri_request_type: URIRequestType<T::AccountId>,
             uri: Vec<u8>,
         ) -> DispatchResult {
             T::AuthorizedOrigin::ensure_origin(origin)?;
@@ -716,7 +697,6 @@ pub mod pallet {
             let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
             let mut is_removed = true;
             URIByOracle::<T>::try_mutate_exists(
-                &uri_request_type,
                 |uri_parts| -> DispatchResult {
                     if let Some(v) = uri_parts {
                         let new = v
@@ -732,9 +712,7 @@ pub mod pallet {
                 },
             )?;
             if is_removed {
-                Self::deposit_event(Event::<T>::URIByOracleRemoved {
-                    uri_part: uri_part.into(),
-                });
+                Self::deposit_event(Event::<T>::URIByOracleRemoved);
             }
             Ok(())
         }
@@ -780,82 +758,43 @@ where
 
     fn check_claim_type(uri_part: &URIPart, claim_type: &ClaimType) -> DispatchResult {
         match claim_type {
-            ClaimType::File => {
-                ensure!(
-                    uri_part.scheme == "urauth://".as_bytes().to_vec(),
-                    Error::<T>::BadClaim
-                );
-                ensure!(
-                    uri_part.host == Some("file".as_bytes().to_vec()),
-                    Error::<T>::BadClaim
-                );
-            }
-            ClaimType::Dataset { .. } => {
-                ensure!(
-                    uri_part.scheme == "urauth://".as_bytes().to_vec(),
-                    Error::<T>::BadClaim
-                );
-                ensure!(
-                    uri_part.host == Some("dataset".as_bytes().to_vec()),
-                    Error::<T>::BadClaim
-                );
-            }
+            ClaimType::Domain => ensure!(uri_part.host.is_some(), Error::<T>::BadClaim),
             _ => {
-                ensure!(uri_part.host.is_some(), Error::<T>::BadClaim);
+                ensure!(
+                    uri_part.scheme == "urauth://".as_bytes().to_vec(),
+                    Error::<T>::BadClaim
+                );
             }
         }
         Ok(())
     }
 
-    fn check_request_type(
-        uri_request_type: URIRequestType<T::AccountId>,
-        claim_type: &ClaimType,
+    fn check_uri_type(
+        uri_type: &URIType,
         raw_uri: &Vec<u8>,
-    ) -> Result<URI, DispatchError> {
+        maybe_parent_acc: Option<T::AccountId>,
+    ) -> Result<(URI, bool), DispatchError> {
+        let URIType { is_root, is_oracle, claim_type } = uri_type;
         let parsed_uri_part: URIPart = T::URAuthParser::parse(raw_uri, claim_type)?.into();
-        if_std! { println!("{}", parsed_uri_part )}
+        let mut should_check_owner: bool = true;
         Self::check_claim_type(&parsed_uri_part, claim_type)?;
-        let uri = match uri_request_type {
-            URIRequestType::Oracle { is_root } => {
-                if is_root {
-                    ensure!(parsed_uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
-                    let (_, root_uri) = parsed_uri_part.full_uri();
-                    root_uri
-                } else {
-                    let mut temp: Option<Vec<u8>> = None;
-                    if let Some(uri_parts) = URIByOracle::<T>::get(&uri_request_type) {
-                        for uri_part in uri_parts {
-                            if parsed_uri_part == uri_part {
-                                let (_, full_uri) = parsed_uri_part.full_uri();
-                                temp = Some(full_uri);
-                                break;
-                            }
-                        }
-                        temp.ok_or(Error::<T>::BadClaim)?
-                    } else {
-                        return Err(Error::<T>::BadClaim.into());
-                    }
-                }
-            }
-            URIRequestType::Any {
-                is_root,
-                maybe_parent_acc,
-            } => {
-                if is_root {
-                    ensure!(parsed_uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
-                    let (_, root_uri) = parsed_uri_part.full_uri();
-                    root_uri
-                } else {
-                    Self::check_parent_owner(
-                        raw_uri,
-                        &maybe_parent_acc.ok_or(Error::<T>::BadClaim)?,
-                        &claim_type,
-                    )?;
-                    raw_uri.clone()
-                }
+        let uri = if *is_root {
+            ensure!(parsed_uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
+            let (_, root_uri) = parsed_uri_part.full_uri();
+            root_uri
+        } else {
+            if *is_oracle {
+                Self::check_uri_by_oracle(parsed_uri_part)?
+            } else {
+                should_check_owner = false;
+                Self::check_parent_owner(
+                    raw_uri.clone(),
+                    &maybe_parent_acc.ok_or(Error::<T>::BadClaim)?,
+                    &claim_type,
+                )?
             }
         };
-        Ok(uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?)
+        Ok((uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?, should_check_owner))
     }
 
     /// Check owner of given 'uri'. Parse the given uri
@@ -872,19 +811,35 @@ where
     /// Check `maybe_owner == owner1?` -> `maybe_owner == owner2?` -> `maybe_owner == owner3?`.
     /// If not, return `Error::<T>::NotURAuthDocOwner`
     fn check_parent_owner(
-        raw_uri: &Vec<u8>,
+        raw_uri: Vec<u8>,
         maybe_owner: &T::AccountId,
         claim_type: &ClaimType,
-    ) -> Result<(), DispatchError> {
-        let uris = <URAuthParser<T> as Parser<T>>::parse_parent_uris(raw_uri, &claim_type)?;
+    ) -> Result<Vec<u8>, DispatchError> {
+        let uris = <URAuthParser<T> as Parser<T>>::parse_parent_uris(&raw_uri, &claim_type)?;
         for uri in uris {
             if let Some(urauth_doc) = URAuthTree::<T>::get(&uri) {
                 if urauth_doc.is_owner(maybe_owner) {
-                    return Ok(());
+                    return Ok(raw_uri);
                 }
             }
         }
         Err(Error::<T>::NotURAuthDocOwner.into())
+    }
+
+    fn check_uri_by_oracle(parsed_uri_part: URIPart) -> Result<Vec<u8> ,DispatchError> {
+        let mut temp: Option<Vec<u8>> = None;
+        if let Some(uri_parts) = URIByOracle::<T>::get() {
+            for uri_part in uri_parts {
+                if parsed_uri_part == uri_part {
+                    let (_, full_uri) = parsed_uri_part.full_uri();
+                    temp = Some(full_uri);
+                    break;
+                }
+            }
+            temp.ok_or(Error::<T>::BadClaim.into())
+        } else {
+            return Err(Error::<T>::BadClaim.into());
+        }
     }
 
     fn new_urauth_doc(
@@ -911,6 +866,7 @@ where
         owner_did: &OwnerDID,
         signature: &MultiSignature,
         signer: MultiSigner,
+        should_check_owner: bool,
     ) -> Result<(), DispatchError> {
         let urauth_signed_payload = URAuthSignedPayload::<T::AccountId>::Request {
             uri: uri.clone(),
@@ -922,7 +878,9 @@ where
             signer.clone().into_account(),
         ))?;
 
-        Self::check_is_valid_owner(owner_did, &signer_account_id)?;
+        if should_check_owner {
+            Self::check_is_valid_owner(owner_did, &signer_account_id)?;
+        }
 
         // Check signature
         if !urauth_signed_payload
@@ -959,7 +917,7 @@ where
         match res {
             VerificationSubmissionResult::Complete => {
                 let RequestMetadata {
-                    claim_type,
+                    uri_type,
                     maybe_register_uri,
                     ..
                 } = metadata;
@@ -967,7 +925,7 @@ where
                 URAuthTree::<T>::insert(&maybe_register_uri, urauth_doc.clone());
                 Self::remove_all_uri_related(&uri);
                 Self::deposit_event(Event::<T>::URAuthTreeRegistered {
-                    claim_type,
+                    uri_type,
                     uri: maybe_register_uri,
                     urauth_doc,
                 })
