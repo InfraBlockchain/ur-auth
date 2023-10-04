@@ -379,7 +379,7 @@ impl MockURAuthDocManager {
 #[derive(Clone)]
 pub struct RequestCall {
     origin: RuntimeOrigin,
-    uri_type: URIType,
+    claim_type: ClaimType,
     uri: Vec<u8>,
     owner_did: Vec<u8>,
     challenge: Option<Randomness>,
@@ -390,7 +390,7 @@ pub struct RequestCall {
 impl RequestCall {
     pub fn new(
         origin: RuntimeOrigin,
-        uri_type: URIType,
+        claim_type: ClaimType,
         uri: Vec<u8>,
         owner_did: Vec<u8>,
         challenge: Option<Randomness>,
@@ -399,7 +399,7 @@ impl RequestCall {
     ) -> Self {
         Self {
             origin,
-            uri_type,
+            claim_type,
             uri,
             owner_did,
             challenge,
@@ -412,7 +412,7 @@ impl RequestCall {
         match self.challenge {
             Some(_) => URAuth::request_register_ownership(
                 self.origin,
-                self.uri_type,
+                self.claim_type,
                 self.uri,
                 self.owner_did,
                 self.challenge,
@@ -421,7 +421,7 @@ impl RequestCall {
             ),
             None => URAuth::claim_ownership(
                 self.origin,
-                self.uri_type,
+                self.claim_type,
                 self.uri,
                 self.owner_did,
                 self.signer,
@@ -433,8 +433,8 @@ impl RequestCall {
         self.origin = origin;
         self
     }
-    pub fn set_uri_type(mut self, uri_type: URIType) -> Self {
-        self.uri_type = uri_type;
+    pub fn set_claim_type(mut self, claim_type: ClaimType) -> Self {
+        self.claim_type = claim_type;
         self
     }
     pub fn set_uri(mut self, uri: Vec<u8>) -> Self {
@@ -461,7 +461,7 @@ impl RequestCall {
 
 pub struct AddURIByOracleCall {
     pub origin: RuntimeOrigin,
-    pub uri_type: URIType,
+    pub claim_type: ClaimType,
     pub uri: Vec<u8>,
 }
 
@@ -469,12 +469,12 @@ impl AddURIByOracleCall {
     pub fn runtime_call(&self) -> DispatchResult {
         URAuth::add_uri_by_oracle(
             self.origin.clone(),
-            self.uri_type.clone(),
+            self.claim_type.clone(),
             self.uri.clone(),
         )
     }
-    pub fn set_uri_type(mut self, uri_type: URIType) -> Self {
-        self.uri_type = uri_type;
+    pub fn set_claim_type(mut self, claim_type: ClaimType) -> Self {
+        self.claim_type = claim_type;
         self
     }
     pub fn set_uri(mut self, uri: Vec<u8>) -> Self {

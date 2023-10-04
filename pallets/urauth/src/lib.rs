@@ -241,7 +241,7 @@ pub mod pallet {
         URAuthRegisterRequested { uri: URI },
         /// `URAuthDoc` is registered on `URAuthTree`.
         URAuthTreeRegistered {
-            uri_type: URIType,
+            claim_type: ClaimType,
             uri: URI,
             urauth_doc: URAuthDoc<T::AccountId>,
         },
@@ -312,16 +312,10 @@ pub mod pallet {
         NotURIByOracle,
         /// Given URI is not valid
         NotValidURI,
-        /// Given URI should be claimed by Oracle
-        NotClaimByOracle,
-        /// Given URI is not root
-        NotRootURI,
         /// General error on proof where it is required but it is not given.
         ProofMissing,
         /// Error when challenge value is not stored for requested URI.
         ChallengeValueMissing,
-        /// Given uri should have protocol
-        ProtocolMissing,
         /// Challenge value is not provided when `ChallengeValueConfig.randomness` is false.
         ChallengeValueNotProvided,
         /// When try to update `URAuthDoc` which has not registered.
@@ -368,7 +362,7 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn request_register_ownership(
             origin: OriginFor<T>,
-            uri_type: URIType,
+            claim_type: ClaimType,
             uri: Vec<u8>,
             owner_did: Vec<u8>,
             challenge_value: Option<Randomness>,
@@ -376,9 +370,8 @@ pub mod pallet {
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            ensure!(uri_type.is_oracle(), Error::<T>::BadClaim );
             let (maybe_register_uri, should_check_owner) =
-                Self::check_uri_type(&uri_type, &uri, None)?;
+                Self::check_uri(&claim_type, true, &uri, None)?;
             ensure!(
                 URAuthTree::<T>::get(&maybe_register_uri).is_none(),
                 Error::<T>::AlreadyRegistered
@@ -390,6 +383,7 @@ pub mod pallet {
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer, should_check_owner)?;
+            Self::try_add_requested_uris(&bounded_uri)?;
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
             } else {
@@ -398,7 +392,7 @@ pub mod pallet {
             ChallengeValue::<T>::insert(&bounded_uri, cv);
             Metadata::<T>::insert(
                 &bounded_uri,
-                RequestMetadata::new(bounded_owner_did, cv, uri_type, maybe_register_uri),
+                RequestMetadata::new(bounded_owner_did, cv, claim_type, maybe_register_uri),
             );
 
             Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri: bounded_uri });
@@ -533,19 +527,18 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn claim_ownership(
             origin: OriginFor<T>,
-            uri_type: URIType,
+            claim_type: ClaimType,
             uri: Vec<u8>,
             owner_did: Vec<u8>,
             signer: MultiSigner,
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            ensure!(!uri_type.is_oracle(), Error::<T>::BadClaim);
 
             let maybe_parent_acc = Self::account_id_from_source(AccountIdSource::AccountId32(
                 signer.clone().into_account(),
             ))?;
-            let (maybe_register_uri, should_check_owner) = Self::check_uri_type(&uri_type, &uri, Some(maybe_parent_acc))?;
+            let (maybe_register_uri, should_check_owner) = Self::check_uri(&claim_type, false, &uri, Some(maybe_parent_acc))?;
             ensure!(
                 URAuthTree::<T>::get(&maybe_register_uri).is_none(),
                 Error::<T>::AlreadyRegistered
@@ -556,7 +549,7 @@ pub mod pallet {
             Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer, should_check_owner)?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
-            let urauth_doc = match uri_type.claim_type.clone() {
+            let urauth_doc = match claim_type.clone() {
                 ClaimType::Contents {
                     data_source,
                     name,
@@ -587,7 +580,7 @@ pub mod pallet {
 
             URAuthTree::<T>::insert(&maybe_register_uri, urauth_doc.clone());
             Self::deposit_event(Event::<T>::URAuthTreeRegistered {
-                uri_type,
+                claim_type,
                 uri: maybe_register_uri,
                 urauth_doc,
             });
@@ -662,17 +655,13 @@ pub mod pallet {
         #[pallet::weight(1_000)]
         pub fn add_uri_by_oracle(
             origin: OriginFor<T>,
-            uri_type: URIType,
+            claim_type: ClaimType,
             uri: Vec<u8>,
         ) -> DispatchResult {
             T::AuthorizedOrigin::ensure_origin(origin)?;
-            let URIType { is_root, is_oracle, claim_type } = uri_type;
+
             let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
             Self::check_claim_type(&uri_part, &claim_type)?;
-            ensure!(is_oracle, Error::<T>::BadRequest);
-            if is_root {
-                ensure!(uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
-            }
             URIByOracle::<T>::try_mutate_exists(
                 |uri_parts| -> DispatchResult {
                     let mut new = uri_parts.clone().map_or(Vec::new(), |v| v.to_vec());
@@ -769,21 +758,20 @@ where
         Ok(())
     }
 
-    fn check_uri_type(
-        uri_type: &URIType,
+    fn check_uri(
+        claim_type: &ClaimType,
+        is_oracle: bool,
         raw_uri: &Vec<u8>,
         maybe_parent_acc: Option<T::AccountId>,
     ) -> Result<(URI, bool), DispatchError> {
-        let URIType { is_root, is_oracle, claim_type } = uri_type;
         let parsed_uri_part: URIPart = T::URAuthParser::parse(raw_uri, claim_type)?.into();
         let mut should_check_owner: bool = true;
         Self::check_claim_type(&parsed_uri_part, claim_type)?;
-        let uri = if *is_root {
-            ensure!(parsed_uri_part.is_root(&claim_type), Error::<T>::NotRootURI);
+        let uri = if parsed_uri_part.is_root(claim_type) {
             let (_, root_uri) = parsed_uri_part.full_uri();
             root_uri
         } else {
-            if *is_oracle {
+            if is_oracle {
                 Self::check_uri_by_oracle(parsed_uri_part)?
             } else {
                 should_check_owner = false;
@@ -838,7 +826,7 @@ where
             }
             temp.ok_or(Error::<T>::BadClaim.into())
         } else {
-            return Err(Error::<T>::BadClaim.into());
+            return Err(Error::<T>::NotURIByOracle.into());
         }
     }
 
@@ -917,7 +905,7 @@ where
         match res {
             VerificationSubmissionResult::Complete => {
                 let RequestMetadata {
-                    uri_type,
+                    claim_type,
                     maybe_register_uri,
                     ..
                 } = metadata;
@@ -925,7 +913,7 @@ where
                 URAuthTree::<T>::insert(&maybe_register_uri, urauth_doc.clone());
                 Self::remove_all_uri_related(&uri);
                 Self::deposit_event(Event::<T>::URAuthTreeRegistered {
-                    uri_type,
+                    claim_type,
                     uri: maybe_register_uri,
                     urauth_doc,
                 })

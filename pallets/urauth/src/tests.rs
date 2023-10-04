@@ -17,10 +17,9 @@ fn request_register_ownership_works() {
             urauth_helper.raw_owner_did(),
         ),
     );
-    let uri_type = URIType::new(true, true, ClaimType::Domain);
     let request_call = RequestCall::new(
         RuntimeOrigin::signed(Alice.to_account_id()),
-        uri_type.clone(),
+        ClaimType::Domain,
         uri,
         owner_did.clone(),
         Some(urauth_helper.challenge_value()),
@@ -30,7 +29,7 @@ fn request_register_ownership_works() {
     new_test_ext().execute_with(|| {
         assert_ok!(URAuth::add_uri_by_oracle(
             RuntimeOrigin::root(),
-            uri_type,
+            ClaimType::Domain,
             "https://www.website1.com".into()
         ));
 
@@ -100,7 +99,6 @@ fn verify_challenge_works() {
     let (uri, owner_did, challenge_value, timestamp) = urauth_helper.deconstruct_urauth_doc(None);
     let bounded_uri = urauth_helper.bounded_uri(None);
     let bounded_owner_did = urauth_helper.raw_owner_did();
-    let uri_type = URIType::new(true, true, ClaimType::Domain);
     let request_sig = urauth_helper.create_signature(
         Alice,
         ProofType::Request(bounded_uri.clone(), urauth_helper.raw_owner_did()),
@@ -124,7 +122,7 @@ fn verify_challenge_works() {
 
         assert_ok!(URAuth::request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
-            uri_type,
+            ClaimType::Domain,
             uri.clone(),
             owner_did,
             Some(urauth_helper.challenge_value()),
@@ -156,7 +154,6 @@ fn update_urauth_doc_works() {
     let (uri, owner_did, challenge_value, timestamp) = urauth_helper.deconstruct_urauth_doc(None);
     let bounded_uri = urauth_helper.bounded_uri(None);
     let bounded_owner_did = urauth_helper.raw_owner_did();
-    let uri_type = URIType::new(true, true, ClaimType::Domain);
     let request_sig = urauth_helper.create_signature(
         Alice,
         ProofType::Request(bounded_uri.clone(), bounded_owner_did.clone()),
@@ -180,7 +177,7 @@ fn update_urauth_doc_works() {
 
         assert_ok!(URAuth::request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
-            uri_type,
+            ClaimType::Domain,
             uri.clone(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
@@ -406,7 +403,6 @@ fn verify_challenge_with_multiple_oracle_members() {
     let (uri, owner_did, challenge_value, timestamp) = urauth_helper.deconstruct_urauth_doc(None);
     let bounded_uri = urauth_helper.bounded_uri(None);
     let bounded_owner_did = urauth_helper.raw_owner_did();
-    let uri_type = URIType::new(true, true, ClaimType::Domain);
     let request_sig = urauth_helper.create_signature(
         Alice,
         ProofType::Request(bounded_uri.clone(), bounded_owner_did.clone()),
@@ -440,7 +436,7 @@ fn verify_challenge_with_multiple_oracle_members() {
 
         assert_ok!(URAuth::request_register_ownership(
             RuntimeOrigin::signed(Alice.to_account_id()),
-            uri_type,
+            ClaimType::Domain,
             uri.clone(),
             owner_did.clone(),
             Some(urauth_helper.challenge_value()),
@@ -512,7 +508,7 @@ fn integrity_test() {
 
     let request_call = RequestCall::new(
         RuntimeOrigin::signed(Alice.to_account_id()),
-        URIType::new(true, true, ClaimType::Domain),
+        ClaimType::Domain,
         uri,
         owner_did.clone(),
         Some(urauth_helper.challenge_value()),
@@ -525,14 +521,6 @@ fn integrity_test() {
             RuntimeOrigin::root(),
             Alice.to_account_id()
         ));
-        // Request type should be 'Oracle'
-        assert_noop!(
-            request_call
-                .clone()
-                .set_uri_type(URIType { is_root: true, is_oracle: false, claim_type: ClaimType::Domain })
-                .runtime_call(),
-            Error::<Test>::BadClaim
-        );
         // Domain without host should fail
         assert_noop!(
             request_call
@@ -541,13 +529,13 @@ fn integrity_test() {
                 .runtime_call(),
             Error::<Test>::BadClaim
         );
-        // URI which is not root should fail
+        // URI which is not contained in URIByOracle
         assert_noop!(
             request_call
                 .clone()
                 .set_uri("sub1.website1.com".as_bytes().to_vec())
                 .runtime_call(),
-            Error::<Test>::NotRootURI
+            Error::<Test>::BadClaim
         );
         assert_ok!(request_call.clone().runtime_call());
         assert_ok!(URAuth::verify_challenge(
@@ -571,7 +559,6 @@ fn integrity_test() {
                 .clone()
                 .set_challenge(None)
                 .set_uri(uri.clone())
-                .set_uri_type(URIType { is_root: false, is_oracle: false, claim_type: ClaimType::Domain })
                 .set_signer(Bob.into())
                 .runtime_call(),
             Error::<Test>::NotURAuthDocOwner
@@ -580,7 +567,6 @@ fn integrity_test() {
         assert_ok!(request_call
             .clone()
             .set_challenge(None)
-            .set_uri_type(URIType { is_root: false, is_oracle: false, claim_type: ClaimType::Domain })
             .set_uri(uri.clone())
             .set_owner_did(bob_did.clone())
             .set_sig(urauth_helper.create_signature(
@@ -600,7 +586,6 @@ fn integrity_test() {
         assert_noop!(
             request_call
                 .clone()
-                .set_uri_type(URIType { is_root: false, is_oracle: true, claim_type: ClaimType::Domain })
                 .set_uri(uri.clone())
                 .set_owner_did(bob_did.clone())
                 .set_sig(urauth_helper.create_signature(
@@ -615,12 +600,11 @@ fn integrity_test() {
         );
         assert_ok!(URAuth::add_uri_by_oracle(
             RuntimeOrigin::root(),
-            URIType { is_root: false, is_oracle: true, claim_type: ClaimType::Domain },
+            ClaimType::Domain,
             "website2.com/*".into()
         ));
         assert_ok!(request_call
             .clone()
-            .set_uri_type(URIType { is_root: false, is_oracle: true, claim_type: ClaimType::Domain })
             .set_uri(uri.clone())
             .set_owner_did(bob_did.clone())
             .set_signer(Bob.into())
@@ -631,15 +615,15 @@ fn integrity_test() {
             .runtime_call());
         let uri = "website3.com/user".as_bytes().to_vec();
         let uri2 = "website3.com/feed/1/2/3".as_bytes().to_vec();
+        let parent = Bob;
         assert_ok!(URAuth::add_uri_by_oracle(
             RuntimeOrigin::root(),
-            URIType { is_root: false, is_oracle: true, claim_type: ClaimType::Domain },
+            ClaimType::Domain, 
             "website3.com/feed/*".into()
         ));
         assert_noop!(
             request_call
                 .clone()
-                .set_uri_type(URIType { is_root: false, is_oracle: true, claim_type: ClaimType::Domain })
                 .set_uri(uri.clone())
                 .set_owner_did(bob_did.clone())
                 .set_sig(urauth_helper.create_signature(
@@ -654,12 +638,11 @@ fn integrity_test() {
         );
         assert_ok!(request_call
             .clone()
-            .set_uri_type(URIType { is_root: false, is_oracle: true, claim_type: ClaimType::Domain })
             .set_uri(uri2.clone())
             .set_owner_did(bob_did.clone())
-            .set_signer(Bob.into())
+            .set_signer(parent.into())
             .set_sig(urauth_helper.create_signature(
-                Bob,
+                parent,
                 ProofType::Request(
                     uri2.try_into().unwrap(),
                     bob_did.clone().try_into().unwrap()
@@ -670,7 +653,7 @@ fn integrity_test() {
         assert_ok!(request_call
             .clone()
             .set_challenge(None)
-            .set_uri_type(URIType { is_root: true, is_oracle: false, claim_type: ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }})
+            .set_claim_type(ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() })
             .set_uri(uri.clone())
             .set_sig(urauth_helper.create_signature(
                 Alice,
@@ -685,23 +668,7 @@ fn integrity_test() {
             request_call
                 .clone()
                 .set_challenge(None)
-                .set_uri_type(URIType { is_root: true, is_oracle: false, claim_type: ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }})
-                .set_uri(uri.clone())
-                .set_sig(urauth_helper.create_signature(
-                    Alice,
-                    ProofType::Request(
-                        uri.clone().try_into().unwrap(),
-                        owner_did.clone().try_into().unwrap()
-                    )
-                ))
-                .runtime_call(),
-            Error::<Test>::NotRootURI
-        );
-        assert_noop!(
-            request_call
-                .clone()
-                .set_challenge(None)
-                .set_uri_type(URIType { is_root: false, is_oracle: false, claim_type: ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }})
+                .set_claim_type(ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() })
                 .set_signer(Bob.into())
                 .set_uri(uri.clone())
                 .set_sig(urauth_helper.create_signature(
@@ -717,7 +684,7 @@ fn integrity_test() {
         assert_ok!(request_call
             .clone()
             .set_challenge(None)
-            .set_uri_type(URIType { is_root: false, is_oracle: false, claim_type: ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }})
+            .set_claim_type(ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() })
             .set_uri(uri.clone())
             .set_sig(urauth_helper.create_signature(
                 Alice,

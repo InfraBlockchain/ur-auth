@@ -21,28 +21,6 @@ pub type URIPartFor<T> = <<T as Config>::URAuthParser as Parser<T>>::Part;
 pub type ClaimTypeFor<T> = <<T as Config>::URAuthParser as Parser<T>>::ClaimType;
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
-pub struct URIType {
-    pub is_root: bool,
-    pub is_oracle: bool,
-    pub claim_type: ClaimType,
-}
-
-impl URIType {
-
-    pub fn new(is_root: bool, is_oracle: bool, claim_type: ClaimType) -> Self {
-        Self {
-            is_root,
-            is_oracle,
-            claim_type
-        }
-    }
-
-    pub fn is_oracle(&self) -> bool {
-        self.is_oracle
-    } 
-}
-
-#[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum ClaimType {
     Domain,
     Contents {
@@ -242,7 +220,7 @@ impl<BoundedString> DataSetMetadata<BoundedString> {
 pub struct RequestMetadata {
     pub owner_did: OwnerDID,
     pub challenge_value: Randomness,
-    pub uri_type: URIType,
+    pub claim_type: ClaimType,
     pub maybe_register_uri: URI,
 }
 
@@ -250,13 +228,13 @@ impl RequestMetadata {
     pub fn new(
         owner_did: OwnerDID,
         challenge_value: Randomness,
-        uri_type: URIType,
+        claim_type: ClaimType,
         maybe_register_uri: URI,
     ) -> Self {
         Self {
             owner_did,
             challenge_value,
-            uri_type,
+            claim_type,
             maybe_register_uri,
         }
     }
