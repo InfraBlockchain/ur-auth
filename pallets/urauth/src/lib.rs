@@ -929,7 +929,7 @@ where
         owner_did: T::AccountId,
         metadata: RequestMetadata,
     ) -> Result<(), DispatchError> {
-        match res {
+       match res {
             VerificationSubmissionResult::Complete => {
                 let RequestMetadata {
                     claim_type,
