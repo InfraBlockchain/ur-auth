@@ -17,10 +17,12 @@ pub type DIDWeight = u16;
 pub type ApprovalCount = u32;
 pub type Threshold = u32;
 pub type URAuthDocCount = u128;
+pub type URAuthChallengeValue = (Vec<u8>, Vec<u8>, Vec<u8>, URI, OwnerDID, Vec<u8>);
 
 pub type URIFor<T> = <<T as Config>::URAuthParser as Parser<T>>::URI;
 pub type URIPartFor<T> = <<T as Config>::URAuthParser as Parser<T>>::Part;
 pub type ClaimTypeFor<T> = <<T as Config>::URAuthParser as Parser<T>>::ClaimType;
+pub type ChallengeValueFor<T> = <<T as Config>::URAuthParser as Parser<T>>::ChallengeValue;
 
 #[derive(Encode, Decode, Clone, PartialEq, Eq, RuntimeDebug, TypeInfo)]
 pub enum ClaimType {
@@ -926,16 +928,14 @@ pub trait Parser<T: Config> {
     type ClaimType;
     type ChallengeValue: Default;
 
-    fn parse(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<Self::Part, DispatchError>;
+    fn parse_uri(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<Self::Part, DispatchError>;
 
     fn parse_parent_uris(
         raw_uri: &Vec<u8>,
         claim_type: &ClaimType,
     ) -> Result<Vec<URI>, DispatchError>;
 
-    fn challenge_json() -> Result<Self::ChallengeValue, DispatchError> {
-        Ok(Default::default())
-    }
+    fn parse_challenge_json(challenge_json: &Vec<u8>) -> Result<Self::ChallengeValue, DispatchError>;
 }
 
 pub struct URAuthParser<T>(PhantomData<T>);
@@ -1087,14 +1087,37 @@ impl<T: Config> URAuthParser<T> {
             Err(Error::<T>::ErrorOnParse.into())
         }
     }
+
+    /// Method for finding _json_value_ based on `field_name` and `sub_field`
+    ///
+    /// ## Error
+    /// `BadChallengeValue`
+    fn find_json_value(
+        json_object: &lite_json::JsonObject,
+        field_name: &str,
+        sub_field: Option<&str>,
+    ) -> Result<Option<Vec<u8>>, DispatchError> {
+        let sub = sub_field.map_or("", |s| s);
+        let (_, json_value) = json_object
+            .iter()
+            .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
+            .ok_or(Error::<T>::BadChallengeValue)?;
+        match json_value {
+            lite_json::JsonValue::String(v) => {
+                Ok(Some(v.iter().map(|c| *c as u8).collect::<Vec<u8>>()))
+            }
+            lite_json::JsonValue::Object(v) => Self::find_json_value(v, sub, None),
+            _ => Ok(None),
+        }
+    }
 }
 impl<T: Config> Parser<T> for URAuthParser<T> {
     type URI = URI;
     type Part = URIPart;
     type ClaimType = ClaimType;
-    type ChallengeValue = Vec<u8>;
+    type ChallengeValue = (Vec<u8>, Vec<u8>, Vec<u8>, URI, OwnerDID, Vec<u8>);
 
-    fn parse(raw_uri: &Vec<u8>, claim_type: &Self::ClaimType) -> Result<Self::Part, DispatchError> {
+    fn parse_uri(raw_uri: &Vec<u8>, claim_type: &Self::ClaimType) -> Result<Self::Part, DispatchError> {
         Self::try_parse(raw_uri, claim_type)
     }
 
@@ -1103,6 +1126,56 @@ impl<T: Config> Parser<T> for URAuthParser<T> {
         claim_type: &Self::ClaimType,
     ) -> Result<Vec<Self::URI>, DispatchError> {
         Self::try_parse_parent_uris(raw_uri, claim_type)
+    }
+
+    fn parse_challenge_json(challenge_json: &Vec<u8>) -> Result<Self::ChallengeValue, DispatchError> {
+        let json_str = sp_std::str::from_utf8(challenge_json)
+            .map_err(|_| Error::<T>::ErrorConvertToString)?;
+
+        return match lite_json::parse_json(json_str) {
+            Ok(obj) => match obj {
+                // ToDo: Check domain, admin_did, challenge
+                lite_json::JsonValue::Object(obj) => {
+                    let uri = Self::find_json_value(&obj, "domain", None)?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let owner_did = Self::find_json_value(&obj, "adminDID", None)?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let challenge = Self::find_json_value(&obj, "challenge", None)?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let timestamp = Self::find_json_value(&obj, "timestamp", None)?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let proof_type = Self::find_json_value(&obj, "proof", Some("type"))?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let hex_proof = Self::find_json_value(&obj, "proof", Some("proofValue"))?
+                        .ok_or(Error::<T>::BadChallengeValue)?;
+                    let mut proof = [0u8; 64];
+                    hex::decode_to_slice(hex_proof, &mut proof as &mut [u8])
+                        .map_err(|_| Error::<T>::ErrorDecodeHex)?;
+                    let mut raw_payload: Vec<u8> = Default::default();
+                    let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                    let bounded_owner_did: OwnerDID =
+                        owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+                    URAuthSignedPayload::<T::AccountId, BlockNumberFor<T>>::Challenge {
+                        uri: bounded_uri.clone(),
+                        owner_did: bounded_owner_did.clone(),
+                        challenge: challenge.clone(),
+                        timestamp,
+                    }
+                    .using_encoded(|m| raw_payload = m.to_vec());
+
+                    Ok((
+                        proof.to_vec(),
+                        proof_type,
+                        raw_payload,
+                        bounded_uri,
+                        bounded_owner_did,
+                        challenge,
+                    ))
+                }
+                _ => Err(Error::<T>::BadChallengeValue.into()),
+            },
+            Err(_) => Err(Error::<T>::BadChallengeValue.into()),
+        };
     }
 }
 

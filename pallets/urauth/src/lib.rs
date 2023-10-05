@@ -340,6 +340,7 @@ pub mod pallet {
         URIFor<T>: Into<URI>,
         URIPartFor<T>: IsType<URIPart>,
         ClaimTypeFor<T>: From<ClaimType>,
+        ChallengeValueFor<T>: Into<URAuthChallengeValue>
     {
         // Description:
         // This transaction is for a domain owner to request ownership registration in the URAuthTree.
@@ -428,7 +429,7 @@ pub mod pallet {
         // 3. If the signature is valid, generate a metadata(owner_did, challenge_value)
         #[pallet::call_index(1)]
         #[pallet::weight(1_000)]
-        pub fn verify_challenge(origin: OriginFor<T>, challenge_value: Vec<u8>) -> DispatchResult {
+        pub fn verify_challenge(origin: OriginFor<T>, challenge_json: Vec<u8>) -> DispatchResult {
             let who = ensure_signed(origin)?;
 
             ensure!(
@@ -438,7 +439,7 @@ pub mod pallet {
 
             // Parse json
             let (sig, proof_type, raw_payload, uri, owner_did, challenge) =
-                Self::try_handle_challenge_value(&challenge_value)?;
+                T::URAuthParser::parse_challenge_json(&challenge_json)?.into();
 
             // 1. OwnerDID of URI == Challenge Value's DID
             // 2. Verify signature
@@ -456,7 +457,7 @@ pub mod pallet {
             } else {
                 VerificationSubmission::<T>::default()
             };
-            let res = vs.submit(member_count, (who, BlakeTwo256::hash(&challenge_value)))?;
+            let res = vs.submit(member_count, (who, BlakeTwo256::hash(&challenge_json)))?;
             Self::handle_verification_submission_result(&res, vs, &uri, owner, metadata)?;
             Self::deposit_event(Event::<T>::VerificationInfo {
                 uri,
@@ -678,7 +679,7 @@ pub mod pallet {
         ) -> DispatchResult {
             T::AuthorizedOrigin::ensure_origin(origin)?;
 
-            let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
+            let uri_part: URIPart = T::URAuthParser::parse_uri(&uri, &claim_type)?.into();
             Self::check_claim_type(&uri_part, &claim_type)?;
             URIByOracle::<T>::try_mutate_exists(|uri_parts| -> DispatchResult {
                 let mut new = uri_parts.clone().map_or(Vec::new(), |v| v.to_vec());
@@ -699,7 +700,7 @@ pub mod pallet {
         ) -> DispatchResult {
             T::AuthorizedOrigin::ensure_origin(origin)?;
 
-            let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
+            let uri_part: URIPart = T::URAuthParser::parse_uri(&uri, &claim_type)?.into();
             let mut is_removed = true;
             URIByOracle::<T>::try_mutate_exists(|uri_parts| -> DispatchResult {
                 if let Some(v) = uri_parts {
@@ -784,7 +785,7 @@ where
         raw_uri: &Vec<u8>,
         maybe_parent_acc: Option<T::AccountId>,
     ) -> Result<(URI, bool), DispatchError> {
-        let parsed_uri_part: URIPart = T::URAuthParser::parse(raw_uri, claim_type)?.into();
+        let parsed_uri_part: URIPart = T::URAuthParser::parse_uri(raw_uri, claim_type)?.into();
         let mut should_check_owner: bool = true;
         Self::check_claim_type(&parsed_uri_part, claim_type)?;
         let uri = if parsed_uri_part.is_root(claim_type) {
@@ -1166,91 +1167,6 @@ where
         ChallengeValue::<T>::remove(uri);
 
         Self::deposit_event(Event::<T>::Removed { uri: uri.clone() })
-    }
-
-    /// Try parse the raw-json and return opaque type of
-    /// (`Signature`, `proof type`, `payload`, `uri`, `owner_did`, `challenge`)
-    ///
-    /// ## Errors
-    /// `ErrorConvertToString`
-    /// - Error on converting raw-json to string-json
-    ///
-    /// `BadChallengeValue`
-    /// - When input is not type of `lite_json::Object`
-    /// - Fail on parsing some fields
-    fn try_handle_challenge_value(
-        challenge_value: &Vec<u8>,
-    ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, URI, OwnerDID, Vec<u8>), DispatchError> {
-        let json_str = sp_std::str::from_utf8(challenge_value)
-            .map_err(|_| Error::<T>::ErrorConvertToString)?;
-
-        return match lite_json::parse_json(json_str) {
-            Ok(obj) => match obj {
-                // ToDo: Check domain, admin_did, challenge
-                lite_json::JsonValue::Object(obj) => {
-                    let uri = Self::find_json_value(&obj, "domain", None)?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let owner_did = Self::find_json_value(&obj, "adminDID", None)?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let challenge = Self::find_json_value(&obj, "challenge", None)?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let timestamp = Self::find_json_value(&obj, "timestamp", None)?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let proof_type = Self::find_json_value(&obj, "proof", Some("type"))?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let hex_proof = Self::find_json_value(&obj, "proof", Some("proofValue"))?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let mut proof = [0u8; 64];
-                    hex::decode_to_slice(hex_proof, &mut proof as &mut [u8])
-                        .map_err(|_| Error::<T>::ErrorDecodeHex)?;
-                    let mut raw_payload: Vec<u8> = Default::default();
-                    let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-                    let bounded_owner_did: OwnerDID =
-                        owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-                    URAuthSignedPayload::<T::AccountId, BlockNumberFor<T>>::Challenge {
-                        uri: bounded_uri.clone(),
-                        owner_did: bounded_owner_did.clone(),
-                        challenge: challenge.clone(),
-                        timestamp,
-                    }
-                    .using_encoded(|m| raw_payload = m.to_vec());
-
-                    Ok((
-                        proof.to_vec(),
-                        proof_type,
-                        raw_payload,
-                        bounded_uri,
-                        bounded_owner_did,
-                        challenge,
-                    ))
-                }
-                _ => Err(Error::<T>::BadChallengeValue.into()),
-            },
-            Err(_) => Err(Error::<T>::BadChallengeValue.into()),
-        };
-    }
-
-    /// Method for finding _json_value_ based on `field_name` and `sub_field`
-    ///
-    /// ## Error
-    /// `BadChallengeValue`
-    fn find_json_value(
-        json_object: &lite_json::JsonObject,
-        field_name: &str,
-        sub_field: Option<&str>,
-    ) -> Result<Option<Vec<u8>>, DispatchError> {
-        let sub = sub_field.map_or("", |s| s);
-        let (_, json_value) = json_object
-            .iter()
-            .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
-            .ok_or(Error::<T>::BadChallengeValue)?;
-        match json_value {
-            lite_json::JsonValue::String(v) => {
-                Ok(Some(v.iter().map(|c| *c as u8).collect::<Vec<u8>>()))
-            }
-            lite_json::JsonValue::Object(v) => Self::find_json_value(v, sub, None),
-            _ => Ok(None),
-        }
     }
 
     /// Try to convert some id sources to `T::AccountId` based on `AccountIdSource::DID` or `AccountIdSource::AccountId32`
