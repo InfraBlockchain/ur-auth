@@ -41,16 +41,16 @@ impl MaxEncodedLen for ClaimType {
 #[derive(Encode, Decode, Clone, RuntimeDebug, TypeInfo, MaxEncodedLen)]
 #[scale_info(skip_type_params(T))]
 pub struct DidDetails<T: Config> {
-    pub nonce: BlockNumberFor<T>
+    pub nonce: BlockNumberFor<T>,
 }
 
-impl<T: Config> DidDetails<T> 
+impl<T: Config> DidDetails<T>
 where
-    BlockNumberFor<T>: From<u8>
+    BlockNumberFor<T>: From<u8>,
 {
     pub fn default() -> Self {
         Self {
-            nonce: Default::default()
+            nonce: Default::default(),
         }
     }
 
@@ -59,7 +59,10 @@ where
     }
 
     pub fn try_increase_nonce(&mut self) -> DispatchResult {
-        self.nonce = self.nonce.checked_add(&1u8.into()).ok_or(Error::<T>::Overflow)?;
+        self.nonce = self
+            .nonce
+            .checked_add(&1u8.into())
+            .ok_or(Error::<T>::Overflow)?;
         Ok(())
     }
 }
@@ -402,7 +405,11 @@ pub enum URAuthSignedPayload<Account, BlockNumber> {
 impl<Account: Encode, BlockNumber: Encode> Encode for URAuthSignedPayload<Account, BlockNumber> {
     fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
         let raw_payload = match self {
-            URAuthSignedPayload::Request { uri, owner_did, nonce } => (uri, owner_did, nonce).encode(),
+            URAuthSignedPayload::Request {
+                uri,
+                owner_did,
+                nonce,
+            } => (uri, owner_did, nonce).encode(),
             URAuthSignedPayload::Challenge {
                 uri,
                 owner_did,
@@ -413,7 +420,7 @@ impl<Account: Encode, BlockNumber: Encode> Encode for URAuthSignedPayload<Accoun
                 uri,
                 urauth_doc,
                 owner_did,
-                nonce
+                nonce,
             } => {
                 let URAuthDoc {
                     id,
@@ -442,7 +449,7 @@ impl<Account: Encode, BlockNumber: Encode> Encode for URAuthSignedPayload<Accoun
                     asset,
                     data_source,
                     owner_did,
-                    nonce
+                    nonce,
                 )
                     .encode()
             }
@@ -1214,18 +1221,15 @@ mod tests {
     #[test]
     fn parse_works() {
         // URI with length less than minimum should fail
-        assert!(URAuthParser::<Test>::try_parse(
-            &"in".as_bytes().to_vec(),
-            &ClaimType::Domain
-        )
-        .is_err());
+        assert!(
+            URAuthParser::<Test>::try_parse(&"in".as_bytes().to_vec(), &ClaimType::Domain).is_err()
+        );
 
         // Full URI with domain
         let raw_uri = "https://sub2.sub1.instagram.com/user1/feed"
             .as_bytes()
             .to_vec();
-        let uri_part =
-            URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Domain).unwrap();
+        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Domain).unwrap();
         assert_eq!(uri_part.scheme, "https://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("instagram.com".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, Some("sub2.sub1.".as_bytes().to_vec()));
@@ -1233,8 +1237,7 @@ mod tests {
 
         // URI without scheme. Default is 'https://'
         let raw_uri = "instagram.com/user1/feed".as_bytes().to_vec();
-        let uri_part =
-            URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Domain).unwrap();
+        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Domain).unwrap();
         assert_eq!(uri_part.scheme, "https://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("instagram.com".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, Some("www.".as_bytes().to_vec()));
@@ -1242,7 +1245,15 @@ mod tests {
 
         // Full URI related to 'file' or 'dataset'
         let raw_uri = "urauth://file/cid".as_bytes().to_vec();
-        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }).unwrap();
+        let uri_part = URAuthParser::<Test>::try_parse(
+            &raw_uri,
+            &ClaimType::Contents {
+                data_source: None,
+                name: Default::default(),
+                description: Default::default(),
+            },
+        )
+        .unwrap();
         assert_eq!(uri_part.scheme, "urauth://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("file".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, None);
@@ -1251,14 +1262,30 @@ mod tests {
         // Partial URI related to 'file' or 'dataset'.
         // Scheme is set to 'urauth://'
         let raw_uri = "file/cid".as_bytes().to_vec();
-        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }).unwrap();
+        let uri_part = URAuthParser::<Test>::try_parse(
+            &raw_uri,
+            &ClaimType::Contents {
+                data_source: None,
+                name: Default::default(),
+                description: Default::default(),
+            },
+        )
+        .unwrap();
         assert_eq!(uri_part.scheme, "urauth://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("file".as_bytes().to_vec()));
         assert_eq!(uri_part.sub_domain, None);
         assert_eq!(uri_part.path, Some("/cid".as_bytes().to_vec()));
 
         let raw_uri = "sub2.sub1.file/cid".as_bytes().to_vec();
-        let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }).unwrap();
+        let uri_part = URAuthParser::<Test>::try_parse(
+            &raw_uri,
+            &ClaimType::Contents {
+                data_source: None,
+                name: Default::default(),
+                description: Default::default(),
+            },
+        )
+        .unwrap();
         println!(
             "{:?}",
             sp_std::str::from_utf8(&uri_part.host.clone().unwrap())
@@ -1285,10 +1312,7 @@ mod tests {
             true
         );
         assert_eq!(
-            is_root_domain(
-                "https://sub2.sub1.www.instagram.com",
-                ClaimType::Domain
-            ),
+            is_root_domain("https://sub2.sub1.www.instagram.com", ClaimType::Domain),
             false
         );
         assert_eq!(
@@ -1300,35 +1324,60 @@ mod tests {
             true
         );
         assert_eq!(
-            is_root_domain(
-                "ftp://sub2.sub1.www.instagram.com",
-                ClaimType::Domain
-            ),
+            is_root_domain("ftp://sub2.sub1.www.instagram.com", ClaimType::Domain),
             false
         );
         assert_eq!(
-            is_root_domain(
-                "smtp://sub2.sub1.www.instagram.com",
-                ClaimType::Domain
-            ),
+            is_root_domain("smtp://sub2.sub1.www.instagram.com", ClaimType::Domain),
             false
         );
-        assert_eq!(
-            is_root_domain("www.instagram.com", ClaimType::Domain),
-            true
-        );
+        assert_eq!(is_root_domain("www.instagram.com", ClaimType::Domain), true);
         assert_eq!(
             is_root_domain("sub1.instagram.com", ClaimType::Domain),
             false
         );
-        assert_eq!(is_root_domain("urauth://file/", ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }), false);
-        assert_eq!(is_root_domain("urauth://file/cid", ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }), true);
         assert_eq!(
-            is_root_domain("urauth://file/cid/1", ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }),
+            is_root_domain(
+                "urauth://file/",
+                ClaimType::Contents {
+                    data_source: None,
+                    name: Default::default(),
+                    description: Default::default()
+                }
+            ),
             false
         );
         assert_eq!(
-            is_root_domain("urauth://sub1.file/cid/1", ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() }),
+            is_root_domain(
+                "urauth://file/cid",
+                ClaimType::Contents {
+                    data_source: None,
+                    name: Default::default(),
+                    description: Default::default()
+                }
+            ),
+            true
+        );
+        assert_eq!(
+            is_root_domain(
+                "urauth://file/cid/1",
+                ClaimType::Contents {
+                    data_source: None,
+                    name: Default::default(),
+                    description: Default::default()
+                }
+            ),
+            false
+        );
+        assert_eq!(
+            is_root_domain(
+                "urauth://sub1.file/cid/1",
+                ClaimType::Contents {
+                    data_source: None,
+                    name: Default::default(),
+                    description: Default::default()
+                }
+            ),
             false
         );
     }

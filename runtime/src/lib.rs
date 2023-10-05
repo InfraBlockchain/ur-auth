@@ -531,39 +531,39 @@ impl system_token_aggregator::Config for Runtime {
 }
 
 parameter_types! {
-	pub MaximumSchedulerWeight: Weight = Perbill::from_percent(80) *
-		RuntimeBlockWeights::get().max_block;
+    pub MaximumSchedulerWeight: Weight = Perbill::from_percent(80) *
+        RuntimeBlockWeights::get().max_block;
 }
 
 impl pallet_scheduler::Config for Runtime {
-	type RuntimeEvent = RuntimeEvent;
-	type RuntimeOrigin = RuntimeOrigin;
-	type PalletsOrigin = OriginCaller;
-	type RuntimeCall = RuntimeCall;
-	type MaximumWeight = MaximumSchedulerWeight;
-	type ScheduleOrigin = EnsureRoot<AccountId>;
-	#[cfg(feature = "runtime-benchmarks")]
-	type MaxScheduledPerBlock = ConstU32<512>;
-	#[cfg(not(feature = "runtime-benchmarks"))]
-	type MaxScheduledPerBlock = ConstU32<50>;
-	type WeightInfo = pallet_scheduler::weights::SubstrateWeight<Runtime>;
-	type OriginPrivilegeCmp = frame_support::traits::EqualPrivilegeOnly;
-	type Preimages = Preimage;
+    type RuntimeEvent = RuntimeEvent;
+    type RuntimeOrigin = RuntimeOrigin;
+    type PalletsOrigin = OriginCaller;
+    type RuntimeCall = RuntimeCall;
+    type MaximumWeight = MaximumSchedulerWeight;
+    type ScheduleOrigin = EnsureRoot<AccountId>;
+    #[cfg(feature = "runtime-benchmarks")]
+    type MaxScheduledPerBlock = ConstU32<512>;
+    #[cfg(not(feature = "runtime-benchmarks"))]
+    type MaxScheduledPerBlock = ConstU32<50>;
+    type WeightInfo = pallet_scheduler::weights::SubstrateWeight<Runtime>;
+    type OriginPrivilegeCmp = frame_support::traits::EqualPrivilegeOnly;
+    type Preimages = Preimage;
 }
 
 parameter_types! {
-	pub const PreimageBaseDeposit: Balance = MILLIUNIT;
-	// One cent: $10,000 / MB
-	pub const PreimageByteDeposit: Balance = MICROUNIT;
+    pub const PreimageBaseDeposit: Balance = MILLIUNIT;
+    // One cent: $10,000 / MB
+    pub const PreimageByteDeposit: Balance = MICROUNIT;
 }
 
 impl pallet_preimage::Config for Runtime {
-	type WeightInfo = pallet_preimage::weights::SubstrateWeight<Runtime>;
-	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
-	type ManagerOrigin = EnsureRoot<AccountId>;
-	type BaseDeposit = PreimageBaseDeposit;
-	type ByteDeposit = PreimageByteDeposit;
+    type WeightInfo = pallet_preimage::weights::SubstrateWeight<Runtime>;
+    type RuntimeEvent = RuntimeEvent;
+    type Currency = Balances;
+    type ManagerOrigin = EnsureRoot<AccountId>;
+    type BaseDeposit = PreimageBaseDeposit;
+    type ByteDeposit = PreimageByteDeposit;
 }
 
 parameter_types! {
@@ -625,10 +625,10 @@ construct_runtime!(
 
         // Governance
         // Preimage registrar.
-		Preimage: pallet_preimage::{Pallet, Call, Storage, Event<T>} = 40,
+        Preimage: pallet_preimage::{Pallet, Call, Storage, Event<T>} = 40,
 
         // System scheduler.
-		Scheduler: pallet_scheduler::{Pallet, Call, Storage, Event<T>} = 41,
+        Scheduler: pallet_scheduler::{Pallet, Call, Storage, Event<T>} = 41,
     }
 );
 

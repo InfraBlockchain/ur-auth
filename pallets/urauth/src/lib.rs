@@ -12,7 +12,7 @@ use frame_system::pallet_prelude::*;
 use sp_consensus_vrf::schnorrkel::Randomness;
 use sp_core::*;
 use sp_runtime::{
-    traits::{BlakeTwo256, IdentifyAccount, Verify, CheckedAdd},
+    traits::{BlakeTwo256, CheckedAdd, IdentifyAccount, Verify},
     AccountId32, MultiSignature, MultiSigner,
 };
 use sp_std::vec::Vec;
@@ -384,7 +384,13 @@ pub mod pallet {
                 .map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            let (signer_acc, did_detail) = Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer, should_check_owner)?;
+            let (signer_acc, did_detail) = Self::verify_request_proof(
+                &bounded_uri,
+                &bounded_owner_did,
+                &proof,
+                signer,
+                should_check_owner,
+            )?;
             Self::try_add_requested_uris(&bounded_uri)?;
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
@@ -542,7 +548,8 @@ pub mod pallet {
             let maybe_parent_acc = Self::account_id_from_source(AccountIdSource::AccountId32(
                 signer.clone().into_account(),
             ))?;
-            let (maybe_register_uri, should_check_owner) = Self::check_uri(&claim_type, false, &uri, Some(maybe_parent_acc))?;
+            let (maybe_register_uri, should_check_owner) =
+                Self::check_uri(&claim_type, false, &uri, Some(maybe_parent_acc))?;
             ensure!(
                 URAuthTree::<T>::get(&maybe_register_uri).is_none(),
                 Error::<T>::AlreadyRegistered
@@ -550,7 +557,13 @@ pub mod pallet {
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            let (signer_acc, did_detail) = Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer, should_check_owner)?;
+            let (signer_acc, did_detail) = Self::verify_request_proof(
+                &bounded_uri,
+                &bounded_owner_did,
+                &proof,
+                signer,
+                should_check_owner,
+            )?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
             let urauth_doc = match claim_type.clone() {
@@ -667,14 +680,12 @@ pub mod pallet {
 
             let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
             Self::check_claim_type(&uri_part, &claim_type)?;
-            URIByOracle::<T>::try_mutate_exists(
-                |uri_parts| -> DispatchResult {
-                    let mut new = uri_parts.clone().map_or(Vec::new(), |v| v.to_vec());
-                    new.push(uri_part.clone());
-                    *uri_parts = Some(new.try_into().map_err(|_| Error::<T>::OverMaxSize)?);
-                    Ok(())
-                },
-            )?;
+            URIByOracle::<T>::try_mutate_exists(|uri_parts| -> DispatchResult {
+                let mut new = uri_parts.clone().map_or(Vec::new(), |v| v.to_vec());
+                new.push(uri_part.clone());
+                *uri_parts = Some(new.try_into().map_err(|_| Error::<T>::OverMaxSize)?);
+                Ok(())
+            })?;
             Self::deposit_event(Event::<T>::URIByOracleAdded);
             Ok(())
         }
@@ -690,21 +701,19 @@ pub mod pallet {
 
             let uri_part: URIPart = T::URAuthParser::parse(&uri, &claim_type)?.into();
             let mut is_removed = true;
-            URIByOracle::<T>::try_mutate_exists(
-                |uri_parts| -> DispatchResult {
-                    if let Some(v) = uri_parts {
-                        let new = v
-                            .into_iter()
-                            .filter(|u| *u != &uri_part)
-                            .map(|u| u.clone())
-                            .collect::<Vec<URIPart>>();
-                        *uri_parts = Some(new.try_into().map_err(|_| Error::<T>::OverMaxSize)?);
-                    } else {
-                        is_removed = false;
-                    }
-                    Ok(())
-                },
-            )?;
+            URIByOracle::<T>::try_mutate_exists(|uri_parts| -> DispatchResult {
+                if let Some(v) = uri_parts {
+                    let new = v
+                        .into_iter()
+                        .filter(|u| *u != &uri_part)
+                        .map(|u| u.clone())
+                        .collect::<Vec<URIPart>>();
+                    *uri_parts = Some(new.try_into().map_err(|_| Error::<T>::OverMaxSize)?);
+                } else {
+                    is_removed = false;
+                }
+                Ok(())
+            })?;
             if is_removed {
                 Self::deposit_event(Event::<T>::URIByOracleRemoved);
             }
@@ -793,7 +802,10 @@ where
                 )?
             }
         };
-        Ok((uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?, should_check_owner))
+        Ok((
+            uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?,
+            should_check_owner,
+        ))
     }
 
     /// Check owner of given 'uri'. Parse the given uri
@@ -825,7 +837,7 @@ where
         Err(Error::<T>::NotURAuthDocOwner.into())
     }
 
-    fn check_uri_by_oracle(parsed_uri_part: URIPart) -> Result<Vec<u8> ,DispatchError> {
+    fn check_uri_by_oracle(parsed_uri_part: URIPart) -> Result<Vec<u8>, DispatchError> {
         let mut temp: Option<Vec<u8>> = None;
         if let Some(uri_parts) = URIByOracle::<T>::get() {
             for uri_part in uri_parts {
@@ -867,18 +879,18 @@ where
         signer: MultiSigner,
         should_check_owner: bool,
     ) -> Result<(T::AccountId, DidDetails<T>), DispatchError> {
-
         // Check whether account id of owner did and signer are same
         let signer_account_id = Self::account_id_from_source(AccountIdSource::AccountId32(
             signer.clone().into_account(),
         ))?;
 
         let did_detail = Self::try_increase_nonce(&signer_account_id)?;
-        let urauth_signed_payload = URAuthSignedPayload::<T::AccountId, BlockNumberFor<T>>::Request {
-            uri: uri.clone(),
-            owner_did: owner_did.clone(),
-            nonce: did_detail.nonce()
-        };
+        let urauth_signed_payload =
+            URAuthSignedPayload::<T::AccountId, BlockNumberFor<T>>::Request {
+                uri: uri.clone(),
+                owner_did: owner_did.clone(),
+                nonce: did_detail.nonce(),
+            };
 
         if should_check_owner {
             Self::check_is_valid_owner(owner_did, &signer_account_id)?;
@@ -1088,7 +1100,7 @@ where
             uri: uri.clone(),
             urauth_doc: urauth_doc.clone(),
             owner_did: owner_did.clone(),
-            nonce: did_detail.nonce()
+            nonce: did_detail.nonce(),
         };
         let signer = Pallet::<T>::account_id32_from_raw_did(owner_did.to_vec())?;
         if !payload.using_encoded(|m| sig.verify(m, &signer)) {

@@ -234,7 +234,7 @@ impl<Account: Encode> MockProver<Account> {
                     asset,
                     data_source,
                     owner_did,
-                    nonce
+                    nonce,
                 )
                     .encode()
             }

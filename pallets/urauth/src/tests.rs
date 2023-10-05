@@ -15,7 +15,7 @@ fn request_register_ownership_works() {
         ProofType::Request(
             urauth_helper.bounded_uri(None),
             urauth_helper.raw_owner_did(),
-            1
+            1,
         ),
     );
     let request_call = RequestCall::new(
@@ -205,7 +205,7 @@ fn update_urauth_doc_works() {
                 register_uri.clone(),
                 urauth_doc.clone(),
                 bounded_owner_did.clone(),
-                2
+                2,
             ),
         );
         assert_ok!(URAuth::update_urauth_doc(
@@ -241,7 +241,7 @@ fn update_urauth_doc_works() {
                 register_uri.clone(),
                 urauth_doc.clone(),
                 bounded_owner_did.clone(),
-                3
+                3,
             ),
         );
         assert_ok!(URAuth::update_urauth_doc(
@@ -268,7 +268,7 @@ fn update_urauth_doc_works() {
                 register_uri.clone(),
                 urauth_doc.clone(),
                 bounded_owner_did.clone(),
-                4
+                4,
             ),
         );
         assert_ok!(URAuth::update_urauth_doc(
@@ -293,7 +293,7 @@ fn update_urauth_doc_works() {
                 register_uri.clone(),
                 urauth_doc.clone(),
                 bounded_owner_did.clone(),
-                5
+                5,
             ),
         );
         assert_ok!(URAuth::update_urauth_doc(
@@ -321,7 +321,7 @@ fn update_urauth_doc_works() {
                 register_uri.clone(),
                 urauth_doc.clone(),
                 bounded_owner_did.clone(),
-                6
+                6,
             ),
         );
         let ura_update_proof = Proof::ProofV1 {
@@ -500,7 +500,7 @@ fn integrity_test() {
         ProofType::Request(
             urauth_helper.bounded_uri(None),
             urauth_helper.raw_owner_did(),
-            1
+            1,
         ),
     );
     let c_sig = urauth_helper.create_sr25519_signature(
@@ -622,7 +622,11 @@ fn integrity_test() {
             .set_signer(Bob.into())
             .set_sig(urauth_helper.create_signature(
                 Bob,
-                ProofType::Request(uri.try_into().unwrap(), bob_did.clone().try_into().unwrap(), 1)
+                ProofType::Request(
+                    uri.try_into().unwrap(),
+                    bob_did.clone().try_into().unwrap(),
+                    1
+                )
             ))
             .runtime_call());
         let uri = "website3.com/user".as_bytes().to_vec();
@@ -630,7 +634,7 @@ fn integrity_test() {
         let parent = Bob;
         assert_ok!(URAuth::add_uri_by_oracle(
             RuntimeOrigin::root(),
-            ClaimType::Domain, 
+            ClaimType::Domain,
             "website3.com/feed/*".into()
         ));
         assert_noop!(
@@ -667,7 +671,11 @@ fn integrity_test() {
         assert_ok!(request_call
             .clone()
             .set_challenge(None)
-            .set_claim_type(ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() })
+            .set_claim_type(ClaimType::Contents {
+                data_source: None,
+                name: Default::default(),
+                description: Default::default()
+            })
             .set_uri(uri.clone())
             .set_sig(urauth_helper.create_signature(
                 Alice,
@@ -683,7 +691,11 @@ fn integrity_test() {
             request_call
                 .clone()
                 .set_challenge(None)
-                .set_claim_type(ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() })
+                .set_claim_type(ClaimType::Contents {
+                    data_source: None,
+                    name: Default::default(),
+                    description: Default::default()
+                })
                 .set_signer(Bob.into())
                 .set_uri(uri.clone())
                 .set_sig(urauth_helper.create_signature(
@@ -700,7 +712,11 @@ fn integrity_test() {
         assert_ok!(request_call
             .clone()
             .set_challenge(None)
-            .set_claim_type(ClaimType::Contents { data_source: None, name: Default::default(), description: Default::default() })
+            .set_claim_type(ClaimType::Contents {
+                data_source: None,
+                name: Default::default(),
+                description: Default::default()
+            })
             .set_uri(uri.clone())
             .set_sig(urauth_helper.create_signature(
                 Alice,
