@@ -44,8 +44,10 @@ frame-try-runtime = { git = "https://github.com/InfraBlockchain/infra-substrate"
 pallet-aura = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 pallet-authorship = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 pallet-balances = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+pallet-preimage = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 pallet-session = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 pallet-system-token = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
+pallet-scheduler = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 pallet-sudo = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 pallet-timestamp = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
 pallet-transaction-payment = { git = "https://github.com/InfraBlockchain/infra-substrate", default-features = false, branch = "master" }
@@ -105,6 +107,8 @@ std = [
 	"frame-system-rpc-runtime-api/std",
 	"frame-system/std",
 	"frame-system-benchmarking/std",
+	"pallet-scheduler/std",
+	"pallet-preimage/std",
 	"pallet-assets/std",
 	"pallet-asset-link/std",
 	"xcm-primitives/std",
