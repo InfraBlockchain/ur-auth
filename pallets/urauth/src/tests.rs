@@ -15,6 +15,7 @@ fn request_register_ownership_works() {
         ProofType::Request(
             urauth_helper.bounded_uri(None),
             urauth_helper.raw_owner_did(),
+            1
         ),
     );
     let request_call = RequestCall::new(
@@ -64,6 +65,7 @@ fn request_register_ownership_works() {
                     ProofType::Request(
                         urauth_helper.bounded_uri(Some("www.website.com".into())),
                         urauth_helper.raw_owner_did(),
+                        1
                     ),
                 ))
                 .runtime_call(),
@@ -84,6 +86,7 @@ fn request_register_ownership_works() {
                                 .to_vec()
                                 .try_into()
                                 .expect("Too long"),
+                            1
                         ),
                     )
                 )
@@ -101,7 +104,7 @@ fn verify_challenge_works() {
     let bounded_owner_did = urauth_helper.raw_owner_did();
     let request_sig = urauth_helper.create_signature(
         Alice,
-        ProofType::Request(bounded_uri.clone(), urauth_helper.raw_owner_did()),
+        ProofType::Request(bounded_uri.clone(), urauth_helper.raw_owner_did(), 1),
     );
     let challenge_sig = urauth_helper.create_sr25519_signature(
         Alice,
@@ -129,7 +132,7 @@ fn verify_challenge_works() {
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
-
+        assert_eq!(DIDs::<Test>::get(Alice.to_account_id()).unwrap().nonce(), 1);
         assert_ok!(URAuth::verify_challenge(
             RuntimeOrigin::signed(Alice.to_account_id()),
             challenge_value
@@ -156,7 +159,7 @@ fn update_urauth_doc_works() {
     let bounded_owner_did = urauth_helper.raw_owner_did();
     let request_sig = urauth_helper.create_signature(
         Alice,
-        ProofType::Request(bounded_uri.clone(), bounded_owner_did.clone()),
+        ProofType::Request(bounded_uri.clone(), bounded_owner_did.clone(), 1),
     );
     let challenge_sig = urauth_helper.create_sr25519_signature(
         Alice,
@@ -184,7 +187,7 @@ fn update_urauth_doc_works() {
             MultiSigner::Sr25519(Alice.public()),
             request_sig
         ));
-
+        assert_eq!(DIDs::<Test>::get(Alice.to_account_id()).unwrap().nonce(), 1);
         assert_ok!(URAuth::verify_challenge(
             RuntimeOrigin::signed(Alice.to_account_id()),
             challenge_value
@@ -202,6 +205,7 @@ fn update_urauth_doc_works() {
                 register_uri.clone(),
                 urauth_doc.clone(),
                 bounded_owner_did.clone(),
+                2
             ),
         );
         assert_ok!(URAuth::update_urauth_doc(
@@ -237,6 +241,7 @@ fn update_urauth_doc_works() {
                 register_uri.clone(),
                 urauth_doc.clone(),
                 bounded_owner_did.clone(),
+                3
             ),
         );
         assert_ok!(URAuth::update_urauth_doc(
@@ -263,6 +268,7 @@ fn update_urauth_doc_works() {
                 register_uri.clone(),
                 urauth_doc.clone(),
                 bounded_owner_did.clone(),
+                4
             ),
         );
         assert_ok!(URAuth::update_urauth_doc(
@@ -287,6 +293,7 @@ fn update_urauth_doc_works() {
                 register_uri.clone(),
                 urauth_doc.clone(),
                 bounded_owner_did.clone(),
+                5
             ),
         );
         assert_ok!(URAuth::update_urauth_doc(
@@ -314,6 +321,7 @@ fn update_urauth_doc_works() {
                 register_uri.clone(),
                 urauth_doc.clone(),
                 bounded_owner_did.clone(),
+                6
             ),
         );
         let ura_update_proof = Proof::ProofV1 {
@@ -369,7 +377,7 @@ fn update_urauth_doc_works() {
             .expect("Too long");
         let update_signature = urauth_helper.create_sr25519_signature(
             Bob,
-            ProofType::Update(register_uri.clone(), urauth_doc.clone(), bob_did.clone()),
+            ProofType::Update(register_uri.clone(), urauth_doc.clone(), bob_did.clone(), 1),
         );
         assert_ok!(URAuth::update_urauth_doc(
             RuntimeOrigin::signed(Bob.to_account_id()),
@@ -405,7 +413,7 @@ fn verify_challenge_with_multiple_oracle_members() {
     let bounded_owner_did = urauth_helper.raw_owner_did();
     let request_sig = urauth_helper.create_signature(
         Alice,
-        ProofType::Request(bounded_uri.clone(), bounded_owner_did.clone()),
+        ProofType::Request(bounded_uri.clone(), bounded_owner_did.clone(), 1),
     );
     let challenge_sig = urauth_helper.create_sr25519_signature(
         Alice,
@@ -492,6 +500,7 @@ fn integrity_test() {
         ProofType::Request(
             urauth_helper.bounded_uri(None),
             urauth_helper.raw_owner_did(),
+            1
         ),
     );
     let c_sig = urauth_helper.create_sr25519_signature(
@@ -535,7 +544,7 @@ fn integrity_test() {
                 .clone()
                 .set_uri("sub1.website1.com".as_bytes().to_vec())
                 .runtime_call(),
-            Error::<Test>::BadClaim
+            Error::<Test>::NotURIByOracle
         );
         assert_ok!(request_call.clone().runtime_call());
         assert_ok!(URAuth::verify_challenge(
@@ -573,10 +582,12 @@ fn integrity_test() {
                 Alice,
                 ProofType::Request(
                     uri.clone().try_into().unwrap(),
-                    bob_did.clone().try_into().unwrap()
+                    bob_did.clone().try_into().unwrap(),
+                    2
                 )
             ))
             .runtime_call());
+        assert_eq!(DIDs::<Test>::get(Alice.to_account_id()).unwrap().nonce(), 2);
         let reigstered_uri: URI = uri.try_into().unwrap();
         let urauth_doc = URAuthTree::<Test>::get(&reigstered_uri).unwrap();
         debug_doc(&urauth_doc);
@@ -592,11 +603,12 @@ fn integrity_test() {
                     Bob,
                     ProofType::Request(
                         uri.clone().try_into().unwrap(),
-                        bob_did.clone().try_into().unwrap()
+                        bob_did.clone().try_into().unwrap(),
+                        1
                     )
                 ))
                 .runtime_call(),
-            Error::<Test>::BadClaim
+            Error::<Test>::NotURIByOracle
         );
         assert_ok!(URAuth::add_uri_by_oracle(
             RuntimeOrigin::root(),
@@ -610,7 +622,7 @@ fn integrity_test() {
             .set_signer(Bob.into())
             .set_sig(urauth_helper.create_signature(
                 Bob,
-                ProofType::Request(uri.try_into().unwrap(), bob_did.clone().try_into().unwrap())
+                ProofType::Request(uri.try_into().unwrap(), bob_did.clone().try_into().unwrap(), 1)
             ))
             .runtime_call());
         let uri = "website3.com/user".as_bytes().to_vec();
@@ -630,7 +642,8 @@ fn integrity_test() {
                     Bob,
                     ProofType::Request(
                         uri.clone().try_into().unwrap(),
-                        bob_did.clone().try_into().unwrap()
+                        bob_did.clone().try_into().unwrap(),
+                        2
                     )
                 ))
                 .runtime_call(),
@@ -645,7 +658,8 @@ fn integrity_test() {
                 parent,
                 ProofType::Request(
                     uri2.try_into().unwrap(),
-                    bob_did.clone().try_into().unwrap()
+                    bob_did.clone().try_into().unwrap(),
+                    2
                 )
             ))
             .runtime_call());
@@ -659,7 +673,8 @@ fn integrity_test() {
                 Alice,
                 ProofType::Request(
                     uri.try_into().unwrap(),
-                    owner_did.clone().try_into().unwrap()
+                    owner_did.clone().try_into().unwrap(),
+                    3
                 )
             ))
             .runtime_call());
@@ -675,7 +690,8 @@ fn integrity_test() {
                     Alice,
                     ProofType::Request(
                         uri.clone().try_into().unwrap(),
-                        owner_did.clone().try_into().unwrap()
+                        owner_did.clone().try_into().unwrap(),
+                        4
                     )
                 ))
                 .runtime_call(),
@@ -690,18 +706,19 @@ fn integrity_test() {
                 Alice,
                 ProofType::Request(
                     uri.try_into().unwrap(),
-                    owner_did.clone().try_into().unwrap()
+                    owner_did.clone().try_into().unwrap(),
+                    4
                 )
             ))
             .runtime_call());
-        let uri = "website4.com".as_bytes().to_vec();
+        let uri = "website8.com".as_bytes().to_vec();
         let bounded_uri: URI = uri.clone().try_into().unwrap();
         assert_ok!(request_call
             .clone()
             .set_uri(uri.clone())
             .set_sig(urauth_helper.create_signature(
                 Alice,
-                ProofType::Request(bounded_uri.clone(), owner_did.try_into().unwrap())
+                ProofType::Request(bounded_uri.clone(), owner_did.try_into().unwrap(), 5)
             ))
             .runtime_call());
         run_to_block(5);

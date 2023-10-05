@@ -1,3 +1,5 @@
+use core::u64;
+
 use super::*;
 
 use codec::{Decode, Encode, MaxEncodedLen};
@@ -36,7 +38,31 @@ impl MaxEncodedLen for ClaimType {
     }
 }
 
+#[derive(Encode, Decode, Clone, RuntimeDebug, TypeInfo, MaxEncodedLen)]
+#[scale_info(skip_type_params(T))]
+pub struct DidDetails<T: Config> {
+    pub nonce: BlockNumberFor<T>
+}
 
+impl<T: Config> DidDetails<T> 
+where
+    BlockNumberFor<T>: From<u8>
+{
+    pub fn default() -> Self {
+        Self {
+            nonce: Default::default()
+        }
+    }
+
+    pub fn nonce(&self) -> BlockNumberFor<T> {
+        self.nonce
+    }
+
+    pub fn try_increase_nonce(&mut self) -> DispatchResult {
+        self.nonce = self.nonce.checked_add(&1u8.into()).ok_or(Error::<T>::Overflow)?;
+        Ok(())
+    }
+}
 
 #[derive(Encode, Decode, Clone, Eq, RuntimeDebug, TypeInfo)]
 pub struct URIPart {
@@ -353,10 +379,11 @@ impl ChallengeValueConfig {
 
 /// A payload factory for creating message for verifying its signature.
 #[derive(Decode, Clone, PartialEq, Eq)]
-pub enum URAuthSignedPayload<Account> {
+pub enum URAuthSignedPayload<Account, BlockNumber> {
     Request {
         uri: URI,
         owner_did: OwnerDID,
+        nonce: BlockNumber,
     },
     Challenge {
         uri: URI,
@@ -368,13 +395,14 @@ pub enum URAuthSignedPayload<Account> {
         uri: URI,
         urauth_doc: URAuthDoc<Account>,
         owner_did: OwnerDID,
+        nonce: BlockNumber,
     },
 }
 
-impl<Account: Encode> Encode for URAuthSignedPayload<Account> {
+impl<Account: Encode, BlockNumber: Encode> Encode for URAuthSignedPayload<Account, BlockNumber> {
     fn using_encoded<R, F: FnOnce(&[u8]) -> R>(&self, f: F) -> R {
         let raw_payload = match self {
-            URAuthSignedPayload::Request { uri, owner_did } => (uri, owner_did).encode(),
+            URAuthSignedPayload::Request { uri, owner_did, nonce } => (uri, owner_did, nonce).encode(),
             URAuthSignedPayload::Challenge {
                 uri,
                 owner_did,
@@ -385,6 +413,7 @@ impl<Account: Encode> Encode for URAuthSignedPayload<Account> {
                 uri,
                 urauth_doc,
                 owner_did,
+                nonce
             } => {
                 let URAuthDoc {
                     id,
@@ -413,6 +442,7 @@ impl<Account: Encode> Encode for URAuthSignedPayload<Account> {
                     asset,
                     data_source,
                     owner_did,
+                    nonce
                 )
                     .encode()
             }
@@ -973,7 +1003,6 @@ impl<T: Config> URAuthParser<T> {
         if url.has_hostname() {
             let sub_domain_index = Self::sub_domain_start_index(url.hostname(), &claim_type);
             let temp = url.hostname();
-            if_std! { println!("{:?}", temp)}
             if let Some(i) = sub_domain_index {
                 sub_domain = Some(temp[0..=i].as_bytes().to_vec());
                 host = Some(temp[i + 1..].as_bytes().to_vec())
@@ -1141,7 +1170,7 @@ mod tests {
             res,
             Err(sp_runtime::DispatchError::Module(sp_runtime::ModuleError {
                 index: 99,
-                error: [20, 0, 0, 0],
+                error: [24, 0, 0, 0],
                 message: Some("AlreadySubmitted")
             }))
         );

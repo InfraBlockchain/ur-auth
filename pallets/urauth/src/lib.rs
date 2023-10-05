@@ -1,6 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use codec::Encode;
 use fixedstr::zstr;
 
 use frame_support::{
@@ -13,7 +12,7 @@ use frame_system::pallet_prelude::*;
 use sp_consensus_vrf::schnorrkel::Randomness;
 use sp_core::*;
 use sp_runtime::{
-    traits::{BlakeTwo256, IdentifyAccount, Verify},
+    traits::{BlakeTwo256, IdentifyAccount, Verify, CheckedAdd},
     AccountId32, MultiSignature, MultiSigner,
 };
 use sp_std::vec::Vec;
@@ -86,6 +85,9 @@ pub mod pallet {
     /// URAuthDoc
     #[pallet::storage]
     pub type URAuthTree<T: Config> = StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId>>;
+
+    #[pallet::storage]
+    pub type DIDs<T: Config> = StorageMap<_, Twox128, T::AccountId, DidDetails<T>>;
 
     /// **Description:**
     ///
@@ -382,7 +384,7 @@ pub mod pallet {
                 .map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer, should_check_owner)?;
+            let (signer_acc, did_detail) = Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer, should_check_owner)?;
             Self::try_add_requested_uris(&bounded_uri)?;
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
@@ -394,6 +396,7 @@ pub mod pallet {
                 &bounded_uri,
                 RequestMetadata::new(bounded_owner_did, cv, claim_type, maybe_register_uri),
             );
+            DIDs::<T>::insert(&signer_acc, did_detail);
 
             Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri: bounded_uri });
 
@@ -490,17 +493,18 @@ pub mod pallet {
 
             let (mut updated_urauth_doc, mut update_doc_status) =
                 Self::try_update_urauth_doc(&uri, &update_doc_field, updated_at, proof.clone())?;
-            let (owner, proof) =
+            let (owner, proof, did_detail) =
                 Self::try_verify_urauth_doc_proof(&uri, &updated_urauth_doc, proof)?;
             Self::try_store_updated_urauth_doc(
-                owner,
+                owner.clone(),
                 proof,
                 uri,
                 &mut updated_urauth_doc,
                 &mut update_doc_status,
                 update_doc_field,
             )?;
-
+            let owner_acc = Self::account_id_from_source(AccountIdSource::AccountId32(owner))?;
+            DIDs::<T>::insert(&owner_acc, did_detail);
             Ok(())
         }
 
@@ -546,7 +550,7 @@ pub mod pallet {
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer, should_check_owner)?;
+            let (signer_acc, did_detail) = Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer, should_check_owner)?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
             let urauth_doc = match claim_type.clone() {
@@ -579,6 +583,7 @@ pub mod pallet {
             };
 
             URAuthTree::<T>::insert(&maybe_register_uri, urauth_doc.clone());
+            DIDs::<T>::insert(&signer_acc, did_detail);
             Self::deposit_event(Event::<T>::URAuthTreeRegistered {
                 claim_type,
                 uri: maybe_register_uri,
@@ -733,6 +738,12 @@ where
         Default::default()
     }
 
+    fn try_increase_nonce(acc: &T::AccountId) -> Result<DidDetails<T>, DispatchError> {
+        let mut did_detail = DIDs::<T>::get(acc).map_or(DidDetails::default(), |v| v);
+        did_detail.try_increase_nonce()?;
+        Ok(did_detail)
+    }
+
     fn try_add_requested_uris(uri: &URI) -> DispatchResult {
         let expire = <frame_system::Pallet<T>>::block_number() + T::VerificationPeriod::get();
         RequestedURIs::<T>::try_mutate_exists(expire, |uris| -> DispatchResult {
@@ -855,16 +866,19 @@ where
         signature: &MultiSignature,
         signer: MultiSigner,
         should_check_owner: bool,
-    ) -> Result<(), DispatchError> {
-        let urauth_signed_payload = URAuthSignedPayload::<T::AccountId>::Request {
-            uri: uri.clone(),
-            owner_did: owner_did.clone(),
-        };
+    ) -> Result<(T::AccountId, DidDetails<T>), DispatchError> {
 
         // Check whether account id of owner did and signer are same
         let signer_account_id = Self::account_id_from_source(AccountIdSource::AccountId32(
             signer.clone().into_account(),
         ))?;
+
+        let did_detail = Self::try_increase_nonce(&signer_account_id)?;
+        let urauth_signed_payload = URAuthSignedPayload::<T::AccountId, BlockNumberFor<T>>::Request {
+            uri: uri.clone(),
+            owner_did: owner_did.clone(),
+            nonce: did_detail.nonce()
+        };
 
         if should_check_owner {
             Self::check_is_valid_owner(owner_did, &signer_account_id)?;
@@ -877,7 +891,7 @@ where
             return Err(Error::<T>::BadProof.into());
         }
 
-        Ok(())
+        Ok((signer_account_id, did_detail))
     }
 
     fn handle_expired_requsted_uris(n: &BlockNumberFor<T>) -> (u64, u64) {
@@ -1061,7 +1075,7 @@ where
         uri: &URI,
         urauth_doc: &URAuthDoc<T::AccountId>,
         proof: Option<Proof>,
-    ) -> Result<(AccountId32, Proof), DispatchError> {
+    ) -> Result<(AccountId32, Proof, DidDetails<T>), DispatchError> {
         let (owner_did, sig) = match proof.clone().ok_or(Error::<T>::ProofMissing)? {
             Proof::ProofV1 { did, proof } => (did, proof),
         };
@@ -1069,17 +1083,19 @@ where
         if !urauth_doc.multi_owner_did.is_owner(&owner_account) {
             return Err(Error::<T>::NotURAuthDocOwner.into());
         }
-        let payload = URAuthSignedPayload::<T::AccountId>::Update {
+        let did_detail = Self::try_increase_nonce(&owner_account)?;
+        let payload = URAuthSignedPayload::<T::AccountId, BlockNumberFor<T>>::Update {
             uri: uri.clone(),
             urauth_doc: urauth_doc.clone(),
             owner_did: owner_did.clone(),
+            nonce: did_detail.nonce()
         };
         let signer = Pallet::<T>::account_id32_from_raw_did(owner_did.to_vec())?;
         if !payload.using_encoded(|m| sig.verify(m, &signer)) {
             return Err(Error::<T>::BadProof.into());
         }
 
-        Ok((signer, proof.expect("Already checked!")))
+        Ok((signer, proof.expect("Already checked!"), did_detail))
     }
 
     /// Try to store _updated_urauth_doc_ on `URAuthTree::<T>` based on `URAuthDocStatus`
@@ -1179,7 +1195,7 @@ where
                     let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
                     let bounded_owner_did: OwnerDID =
                         owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-                    URAuthSignedPayload::<T::AccountId>::Challenge {
+                    URAuthSignedPayload::<T::AccountId, BlockNumberFor<T>>::Challenge {
                         uri: bounded_uri.clone(),
                         owner_did: bounded_owner_did.clone(),
                         challenge: challenge.clone(),

@@ -80,7 +80,7 @@ impl pallet_urauth::Config for Test {
     type MaxOracleMembers = MaxOracleMembers;
     type MaxURIByOracle = ConstU32<100>;
     type VerificationPeriod = ConstU64<3>;
-    type MaxRequest = ConstU32<100>;
+    type MaxRequest = ConstU32<5>;
     type AuthorizedOrigin = EnsureRoot<MockAccountId>;
 }
 
@@ -188,9 +188,9 @@ impl<Account: Encode> MockURAuthHelper<Account> {
 
 #[derive(Clone)]
 pub enum ProofType<Account: Encode> {
-    Request(URI, OwnerDID),
+    Request(URI, OwnerDID, MockBlockNumber),
     Challenge(URI, OwnerDID, Vec<u8>, Vec<u8>),
-    Update(URI, URAuthDoc<Account>, OwnerDID),
+    Update(URI, URAuthDoc<Account>, OwnerDID, MockBlockNumber),
 }
 
 pub struct MockProver<Account>(PhantomData<Account>);
@@ -202,11 +202,11 @@ impl<Account: Encode> MockProver<Account> {
 
     fn raw_payload(&self, proof_type: ProofType<Account>) -> Vec<u8> {
         let raw = match proof_type {
-            ProofType::Request(uri, owner_did) => (uri, owner_did).encode(),
+            ProofType::Request(uri, owner_did, nonce) => (uri, owner_did, nonce).encode(),
             ProofType::Challenge(uri, owner_did, challenge, timestamp) => {
                 (uri, owner_did, challenge, timestamp).encode()
             }
-            ProofType::Update(uri, urauth_doc, owner_did) => {
+            ProofType::Update(uri, urauth_doc, owner_did, nonce) => {
                 let URAuthDoc {
                     id,
                     created_at,
@@ -234,6 +234,7 @@ impl<Account: Encode> MockProver<Account> {
                     asset,
                     data_source,
                     owner_did,
+                    nonce
                 )
                     .encode()
             }
