@@ -340,7 +340,7 @@ pub mod pallet {
         URIFor<T>: Into<URI>,
         URIPartFor<T>: IsType<URIPart>,
         ClaimTypeFor<T>: From<ClaimType>,
-        ChallengeValueFor<T>: Into<URAuthChallengeValue>
+        ChallengeValueFor<T>: Into<URAuthChallengeValue>,
     {
         // Description:
         // This transaction is for a domain owner to request ownership registration in the URAuthTree.

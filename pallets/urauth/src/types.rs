@@ -935,7 +935,9 @@ pub trait Parser<T: Config> {
         claim_type: &ClaimType,
     ) -> Result<Vec<URI>, DispatchError>;
 
-    fn parse_challenge_json(challenge_json: &Vec<u8>) -> Result<Self::ChallengeValue, DispatchError>;
+    fn parse_challenge_json(
+        challenge_json: &Vec<u8>,
+    ) -> Result<Self::ChallengeValue, DispatchError>;
 }
 
 pub struct URAuthParser<T>(PhantomData<T>);
@@ -1117,7 +1119,10 @@ impl<T: Config> Parser<T> for URAuthParser<T> {
     type ClaimType = ClaimType;
     type ChallengeValue = (Vec<u8>, Vec<u8>, Vec<u8>, URI, OwnerDID, Vec<u8>);
 
-    fn parse_uri(raw_uri: &Vec<u8>, claim_type: &Self::ClaimType) -> Result<Self::Part, DispatchError> {
+    fn parse_uri(
+        raw_uri: &Vec<u8>,
+        claim_type: &Self::ClaimType,
+    ) -> Result<Self::Part, DispatchError> {
         Self::try_parse(raw_uri, claim_type)
     }
 
@@ -1128,9 +1133,11 @@ impl<T: Config> Parser<T> for URAuthParser<T> {
         Self::try_parse_parent_uris(raw_uri, claim_type)
     }
 
-    fn parse_challenge_json(challenge_json: &Vec<u8>) -> Result<Self::ChallengeValue, DispatchError> {
-        let json_str = sp_std::str::from_utf8(challenge_json)
-            .map_err(|_| Error::<T>::ErrorConvertToString)?;
+    fn parse_challenge_json(
+        challenge_json: &Vec<u8>,
+    ) -> Result<Self::ChallengeValue, DispatchError> {
+        let json_str =
+            sp_std::str::from_utf8(challenge_json).map_err(|_| Error::<T>::ErrorConvertToString)?;
 
         return match lite_json::parse_json(json_str) {
             Ok(obj) => match obj {
