@@ -63,7 +63,7 @@ fn request_register_ownership_works() {
                 .set_sig(urauth_helper.create_signature(
                     Alice,
                     ProofType::Request(
-                        urauth_helper.bounded_uri(Some("www.website.com".into())),
+                        urauth_helper.bounded_uri(Some("https://www.website.com".into())),
                         urauth_helper.raw_owner_did(),
                         1
                     ),
@@ -542,7 +542,7 @@ fn integrity_test() {
         assert_noop!(
             request_call
                 .clone()
-                .set_uri("sub1.website1.com".as_bytes().to_vec())
+                .set_uri("https://sub1.website1.com".as_bytes().to_vec())
                 .runtime_call(),
             Error::<Test>::NotURIByOracle
         );
@@ -554,7 +554,7 @@ fn integrity_test() {
         let reigstered_uri: URI = "website1.com".as_bytes().to_vec().try_into().unwrap();
         let urauth_doc = URAuthTree::<Test>::get(&reigstered_uri).unwrap();
         debug_doc(&urauth_doc);
-        let uri = "sub2.sub1.website1.com".as_bytes().to_vec();
+        let uri = "https://sub2.sub1.website1.com".as_bytes().to_vec();
         // Registered URI should not be requested.
         assert_noop!(
             request_call.clone().runtime_call(),
@@ -592,7 +592,7 @@ fn integrity_test() {
         let urauth_doc = URAuthTree::<Test>::get(&reigstered_uri).unwrap();
         debug_doc(&urauth_doc);
 
-        let uri = "website2.com/user".as_bytes().to_vec();
+        let uri = "https://website2.com/user".as_bytes().to_vec();
         // Request URI not in URIByOracle should be fail
         assert_noop!(
             request_call
@@ -613,7 +613,7 @@ fn integrity_test() {
         assert_ok!(URAuth::add_uri_by_oracle(
             RuntimeOrigin::root(),
             ClaimType::Domain,
-            "website2.com/*".into()
+            "https://website2.com/*".into()
         ));
         assert_ok!(request_call
             .clone()
@@ -629,13 +629,13 @@ fn integrity_test() {
                 )
             ))
             .runtime_call());
-        let uri = "website3.com/user".as_bytes().to_vec();
-        let uri2 = "website3.com/feed/1/2/3".as_bytes().to_vec();
+        let uri = "https://website3.com/user".as_bytes().to_vec();
+        let uri2 = "https://website3.com/feed/1/2/3".as_bytes().to_vec();
         let parent = Bob;
         assert_ok!(URAuth::add_uri_by_oracle(
             RuntimeOrigin::root(),
             ClaimType::Domain,
-            "website3.com/feed/*".into()
+            "https://website3.com/feed/*".into()
         ));
         assert_noop!(
             request_call
@@ -727,7 +727,7 @@ fn integrity_test() {
                 )
             ))
             .runtime_call());
-        let uri = "website8.com".as_bytes().to_vec();
+        let uri = "https://website8.com".as_bytes().to_vec();
         let bounded_uri: URI = uri.clone().try_into().unwrap();
         assert_ok!(request_call
             .clone()

@@ -23,6 +23,9 @@ pub use pallet::*;
 pub mod types;
 pub use types::*;
 
+pub mod parser;
+pub use parser::*;
+
 #[cfg(test)]
 pub mod mock;
 
@@ -332,6 +335,8 @@ pub mod pallet {
         MaxRequest,
         /// When trying to update different field on `UpdateInProgress` field
         UpdateInProgress,
+        /// Only URL is supported currently. General URI work in progress
+        GeneralURINotSupportedYet
     }
 
     #[pallet::call]

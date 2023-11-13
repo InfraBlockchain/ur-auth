@@ -1,4 +1,3 @@
-use core::u64;
 
 use super::*;
 
@@ -144,8 +143,13 @@ impl URIPart {
         host: Option<Vec<u8>>,
         path: Option<Vec<u8>>,
     ) -> Self {
+        let mut default_scheme = scheme;
+        if default_scheme == "http".as_bytes().to_vec() {
+            default_scheme = "https".as_bytes().to_vec();
+        }
+        default_scheme.append(&mut "://".as_bytes().to_vec());
         Self {
-            scheme,
+            scheme: default_scheme,
             sub_domain,
             host,
             path,
@@ -942,88 +946,22 @@ pub trait Parser<T: Config> {
 
 pub struct URAuthParser<T>(PhantomData<T>);
 impl<T: Config> URAuthParser<T> {
-    /// Find the start index of where sub-domain is started.
-    /// ### Example
-    /// 1. file -> None
-    /// 2. website.com -> None
-    /// 3. sub1.website.com -> 4
-    fn sub_domain_start_index(host: &str, claim_type: &ClaimType) -> Option<usize> {
-        let mut count = 0;
-        let mut temp = host.clone();
-        let mut maybe_index: Option<usize> = None;
-        while let Some(i) = temp.rfind('.') {
-            count += 1;
-            if matches!(claim_type, ClaimType::Contents { .. }) {
-                maybe_index = Some(i);
-                break;
-            }
-            if count == 2 {
-                maybe_index = Some(i);
-                break;
-            }
-            temp = &temp[0..i];
-        }
-        maybe_index
-    }
-
-    fn add_protocol_if_none(raw_uri: Vec<u8>, claim_type: &ClaimType) -> Vec<u8> {
-        let mut uri: Vec<u8> = Vec::new();
-        let mut raw_uri_bytes = raw_uri;
-        let mut protocol_bytes = "https://".as_bytes().to_vec();
-        if matches!(claim_type, ClaimType::Contents { .. }) {
-            protocol_bytes = "urauth://".as_bytes().to_vec();
-        }
-        let mut is_protocol_exist: bool = false;
-        for i in 0..raw_uri_bytes.len() {
-            if raw_uri_bytes[i] == b':' {
-                is_protocol_exist = true;
-            }
-        }
-        if !is_protocol_exist {
-            uri.append(&mut protocol_bytes);
-        }
-        uri.append(&mut raw_uri_bytes);
-        uri
-    }
 
     pub fn try_parse(raw_uri: &Vec<u8>, claim_type: &ClaimType) -> Result<URIPart, DispatchError> {
+
         if raw_uri.len() < 3 {
             return Err(Error::<T>::BadURI.into());
         }
-        let uri_with_protocol = Self::add_protocol_if_none(raw_uri.clone(), claim_type);
-        let full_uri = sp_std::str::from_utf8(&uri_with_protocol)
+        let full_uri = sp_std::str::from_utf8(&raw_uri)
             .map_err(|_| Error::<T>::ErrorConvertToString)?;
-        let mut sub_domain: Option<Vec<u8>> = None;
-        let mut host: Option<Vec<u8>> = None;
-        let mut path: Option<Vec<u8>> = None;
-        let url = ada_url::Url::parse(full_uri, None).map_err(|_| {
+        let uri = Url::parse(full_uri).map_err(|_| {
             if_std! { println!("Error parsing {:?}", full_uri )}
+            Error::<T>::GeneralURINotSupportedYet
+        })?;
+        let uri_part = uri.convert(claim_type).map_err(|_| {
             Error::<T>::ErrorOnParse
         })?;
-        if url.has_port() {
-            return Err(Error::<T>::NotValidURI.into());
-        }
-        let mut scheme = url.protocol().as_bytes().to_vec();
-        scheme.append(&mut "//".as_bytes().to_vec());
-        // Check path from `url`. Return `Err` if any
-        if url.pathname().len() != 1 {
-            path = Some(url.pathname().as_bytes().to_vec());
-        }
-        if url.has_hostname() {
-            let sub_domain_index = Self::sub_domain_start_index(url.hostname(), &claim_type);
-            let temp = url.hostname();
-            if let Some(i) = sub_domain_index {
-                sub_domain = Some(temp[0..=i].as_bytes().to_vec());
-                host = Some(temp[i + 1..].as_bytes().to_vec())
-            } else {
-                if *claim_type == ClaimType::Domain {
-                    sub_domain = Some("www.".as_bytes().to_vec());
-                }
-                host = Some(temp.as_bytes().to_vec())
-            }
-        }
-
-        Ok(URIPart::new(scheme, sub_domain, host, path))
+        Ok(uri_part)
     }
 
     /// Parse the given uri and will return the list of the parsed `URI`
@@ -1315,8 +1253,7 @@ mod tests {
         assert_eq!(uri_part.sub_domain, Some("sub2.sub1.".as_bytes().to_vec()));
         assert_eq!(uri_part.path, Some("/user1/feed".as_bytes().to_vec()));
 
-        // URI without scheme. Default is 'https://'
-        let raw_uri = "instagram.com/user1/feed".as_bytes().to_vec();
+        let raw_uri = "https://instagram.com/user1/feed".as_bytes().to_vec();
         let uri_part = URAuthParser::<Test>::try_parse(&raw_uri, &ClaimType::Domain).unwrap();
         assert_eq!(uri_part.scheme, "https://".as_bytes().to_vec());
         assert_eq!(uri_part.host, Some("instagram.com".as_bytes().to_vec()));
@@ -1341,7 +1278,7 @@ mod tests {
 
         // Partial URI related to 'file' or 'dataset'.
         // Scheme is set to 'urauth://'
-        let raw_uri = "file/cid".as_bytes().to_vec();
+        let raw_uri = "urauth://file/cid".as_bytes().to_vec();
         let uri_part = URAuthParser::<Test>::try_parse(
             &raw_uri,
             &ClaimType::Contents {
@@ -1356,7 +1293,7 @@ mod tests {
         assert_eq!(uri_part.sub_domain, None);
         assert_eq!(uri_part.path, Some("/cid".as_bytes().to_vec()));
 
-        let raw_uri = "sub2.sub1.file/cid".as_bytes().to_vec();
+        let raw_uri = "urauth://sub2.sub1.file/cid".as_bytes().to_vec();
         let uri_part = URAuthParser::<Test>::try_parse(
             &raw_uri,
             &ClaimType::Contents {
@@ -1411,11 +1348,6 @@ mod tests {
             is_root_domain("smtp://sub2.sub1.www.instagram.com", ClaimType::Domain),
             false
         );
-        assert_eq!(is_root_domain("www.instagram.com", ClaimType::Domain), true);
-        assert_eq!(
-            is_root_domain("sub1.instagram.com", ClaimType::Domain),
-            false
-        );
         assert_eq!(
             is_root_domain(
                 "urauth://file/",
@@ -1463,9 +1395,10 @@ mod tests {
     }
 
     fn is_root_domain(uri: &str, claim_type: ClaimType) -> bool {
-        URAuthParser::<Test>::try_parse(&uri.as_bytes().to_vec(), &claim_type)
-            .unwrap()
-            .is_root(&claim_type)
+        let uri_part = URAuthParser::<Test>::try_parse(&uri.as_bytes().to_vec(), &claim_type)
+            .unwrap();
+        println!("{}", uri_part);
+        uri_part.is_root(&claim_type)
     }
 
     // cargo t -p pallet-urauth --lib -- types::tests::uri_part_eq_works --exact --nocapture

@@ -112,7 +112,7 @@ impl<Account: Encode> MockURAuthHelper<Account> {
         let account_id = account_id.map_or(String::from(ALICE_SS58), |id| id);
         Self {
             mock_doc_manager: MockURAuthDocManager::new(
-                uri.map_or(String::from("www.website1.com"), |uri| uri),
+                uri.map_or(String::from("https://www.website1.com"), |uri| uri),
                 format!("{}{}", "did:infra:ua:", account_id),
                 challenge_value.map_or(String::from("E40Bzg8kAvOIjswwxc29WaQCHuOKwoZC"), |cv| cv),
                 timestamp.map_or(String::from("2023-07-28T10:17:21Z"), |t| t),
