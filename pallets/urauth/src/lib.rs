@@ -1,6 +1,5 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use codec::Encode;
 use fixedstr::zstr;
 
 use frame_support::{
@@ -13,7 +12,7 @@ use frame_system::pallet_prelude::*;
 use sp_consensus_vrf::schnorrkel::Randomness;
 use sp_core::*;
 use sp_runtime::{
-    traits::{BlakeTwo256, IdentifyAccount, Verify},
+    traits::{BlakeTwo256, CheckedAdd, IdentifyAccount, Verify},
     AccountId32, MultiSignature, MultiSigner,
 };
 use sp_std::vec::Vec;
@@ -23,6 +22,9 @@ pub use pallet::*;
 
 pub mod types;
 pub use types::*;
+
+pub mod parser;
+pub use parser::*;
 
 #[cfg(test)]
 pub mod mock;
@@ -45,10 +47,30 @@ pub mod pallet {
     pub trait Config: frame_system::Config {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
+        /// Parser for URAuth Pallet such as _challenge-value_, _URI_
+        type URAuthParser: Parser<Self>;
+        /// Time used for computing document creation.
+        ///
+        /// It is guaranteed to start being called from the first `on_finalize`. Thus value at
+        /// genesis is not used.
         type UnixTime: UnixTime;
 
+        /// The current members of Oracle.
         type MaxOracleMembers: Get<u32>;
 
+        /// URI list which should be verified by _Oracle_
+        #[pallet::constant]
+        type MaxURIByOracle: Get<u32>;
+
+        /// Period for verifying to claim ownership
+        #[pallet::constant]
+        type VerificationPeriod: Get<BlockNumberFor<Self>>;
+
+        #[pallet::constant]
+        type MaxRequest: Get<u32>;
+
+        /// The origin which may be used within _authorized_ call.
+        /// **Root** can always do this.
         type AuthorizedOrigin: EnsureOrigin<Self::RuntimeOrigin>;
     }
 
@@ -67,6 +89,9 @@ pub mod pallet {
     #[pallet::storage]
     pub type URAuthTree<T: Config> = StorageMap<_, Twox128, URI, URAuthDoc<T::AccountId>>;
 
+    #[pallet::storage]
+    pub type DIDs<T: Config> = StorageMap<_, Twox128, T::AccountId, DidDetails<T>>;
+
     /// **Description:**
     ///
     /// Temporarily store the URIMetadata(owner_did and challenge_value) for the unverified URI in preparation for its verification.
@@ -79,7 +104,12 @@ pub mod pallet {
     ///
     /// URIMetadata
     #[pallet::storage]
-    pub type URIMetadata<T: Config> = StorageMap<_, Twox128, URI, Metadata>;
+    #[pallet::unbounded]
+    pub type Metadata<T: Config> = StorageMap<_, Twox128, URI, RequestMetadata>;
+
+    #[pallet::storage]
+    pub type RequestedURIs<T: Config> =
+        StorageMap<_, Twox128, BlockNumberFor<T>, BoundedVec<URI, T::MaxRequest>>;
 
     #[pallet::storage]
     pub type DataSet<T: Config> = StorageMap<_, Twox128, URI, DataSetMetadata<AnyText>>;
@@ -129,23 +159,25 @@ pub mod pallet {
     ///
     /// UpdateDocStatus
     #[pallet::storage]
-    #[pallet::unbounded]
     pub type URAuthDocUpdateStatus<T: Config> =
         StorageMap<_, Blake2_128Concat, DocId, UpdateDocStatus<T::AccountId>, ValueQuery>;
 
-    #[pallet::storage]
-    #[pallet::getter(fn oracle_members)]
     /// **Description:**
     ///
     /// Contains the AccountId information of the Oracle node.
     ///
     /// **Value:**
     ///
-    /// BoundedVec<T::AccoutnId, T::MaxOracleMembers>
+    /// BoundedVec<T::AccountId, T::MaxOracleMembers>
+    #[pallet::storage]
+    #[pallet::getter(fn oracle_members)]
     pub type OracleMembers<T: Config> =
         StorageValue<_, BoundedVec<T::AccountId, T::MaxOracleMembers>, ValueQuery>;
 
     #[pallet::storage]
+    #[pallet::unbounded]
+    pub type URIByOracle<T: Config> = StorageValue<_, Vec<URIPart>, OptionQuery>;
+
     /// **Description:**
     ///
     /// Contains various _config_ information for the URAuth pallet.
@@ -153,6 +185,7 @@ pub mod pallet {
     /// **Value:**
     ///
     /// ChallengeValueConfig
+    #[pallet::storage]
     pub type URAuthConfig<T: Config> = StorageValue<_, ChallengeValueConfig, ValueQuery>;
 
     /// **Description:**
@@ -164,6 +197,18 @@ pub mod pallet {
     /// URAuthDocCount
     #[pallet::storage]
     pub type Counter<T: Config> = StorageValue<_, URAuthDocCount, ValueQuery>;
+
+    #[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T>
+    where
+        URIFor<T>: Into<URI>,
+        URIPartFor<T>: IsType<URIPart>,
+    {
+        fn on_initialize(n: BlockNumberFor<T>) -> Weight {
+            let (r, w) = Self::handle_expired_requsted_uris(&n);
+            T::DbWeight::get().reads_writes(r, w)
+        }
+    }
 
     #[pallet::genesis_config]
     pub struct GenesisConfig<T: Config> {
@@ -201,7 +246,7 @@ pub mod pallet {
         URAuthRegisterRequested { uri: URI },
         /// `URAuthDoc` is registered on `URAuthTree`.
         URAuthTreeRegistered {
-            count: URAuthDocCount,
+            claim_type: ClaimType,
             uri: URI,
             urauth_doc: URAuthDoc<T::AccountId>,
         },
@@ -222,6 +267,10 @@ pub mod pallet {
             urauth_doc: URAuthDoc<T::AccountId>,
             update_doc_status: UpdateDocStatus<T::AccountId>,
         },
+        /// List of `URIByOracle` has been added
+        URIByOracleAdded,
+        /// List of `URIByOracle` has been removed
+        URIByOracleRemoved,
         /// Request of registering URI has been removed.
         Removed { uri: URI },
     }
@@ -236,8 +285,12 @@ pub mod pallet {
         BadSigner,
         /// General error on challenge value(e.g parsing json-string, different challenge value).
         BadChallengeValue,
-        /// Error on verifying challenge before requesting its ownership.
+        /// General error on requesting ownership(e.g URAuth Request, Challenge Value)
         BadRequest,
+        /// General error on claiming ownership
+        BadClaim,
+        /// General error on URI
+        BadURI,
         /// Size is over limit of `MAX_*`
         OverMaxSize,
         /// Error on converting raw-json to json-string.
@@ -254,10 +307,16 @@ pub mod pallet {
         ErrorOnUpdateDoc,
         /// General error on updating `URAuthDocUpdateStatus`(e.g ProofMissing for updating `URAuthDoc`)
         ErrorOnUpdateDocStatus,
+        /// General error on parsing (e.g URI, Challenge Value)
+        ErrorOnParse,
         /// Error on some authorized calls which required origin as Oracle member
         NotOracleMember,
         /// Error when signer of signature is not `URAuthDoc` owner.
         NotURAuthDocOwner,
+        /// Given URI is not URI which should be verified by Oracle
+        NotURIByOracle,
+        /// Given URI is not valid
+        NotValidURI,
         /// General error on proof where it is required but it is not given.
         ProofMissing,
         /// Error when challenge value is not stored for requested URI.
@@ -268,14 +327,26 @@ pub mod pallet {
         URAuthTreeNotRegistered,
         /// Oracle node has voted more than once
         AlreadySubmitted,
+        /// Given URI has already registered on `URAuthTree`.
+        AlreadyRegistered,
         /// When trying to add oracle member more than `T::MaxOracleMembers`
         MaxOracleMembers,
+        /// Max number of request of URI per block has been reached.
+        MaxRequest,
         /// When trying to update different field on `UpdateInProgress` field
         UpdateInProgress,
+        /// Only URL is supported currently. General URI work in progress
+        GeneralURINotSupportedYet
     }
 
     #[pallet::call]
-    impl<T: Config> Pallet<T> {
+    impl<T: Config> Pallet<T>
+    where
+        URIFor<T>: Into<URI>,
+        URIPartFor<T>: IsType<URIPart>,
+        ClaimTypeFor<T>: From<ClaimType>,
+        ChallengeValueFor<T>: Into<URAuthChallengeValue>,
+    {
         // Description:
         // This transaction is for a domain owner to request ownership registration in the URAuthTree.
         // It involves verifying the signature for the data owner's DID on the given URI and,
@@ -297,8 +368,9 @@ pub mod pallet {
         // 3. If the signature is valid, generate a metadata(owner_did, challenge_value)
         #[pallet::call_index(0)]
         #[pallet::weight(1_000)]
-        pub fn urauth_request_register_ownership(
+        pub fn request_register_ownership(
             origin: OriginFor<T>,
+            claim_type: ClaimType,
             uri: Vec<u8>,
             owner_did: Vec<u8>,
             challenge_value: Option<Randomness>,
@@ -306,19 +378,37 @@ pub mod pallet {
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
-            let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
+            let (maybe_register_uri, should_check_owner) =
+                Self::check_uri(&claim_type, true, &uri, None)?;
+            ensure!(
+                URAuthTree::<T>::get(&maybe_register_uri).is_none(),
+                Error::<T>::AlreadyRegistered
+            );
+            let bounded_uri: URI = uri
+                .clone()
+                .try_into()
+                .map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
-
+            let (signer_acc, did_detail) = Self::verify_request_proof(
+                &bounded_uri,
+                &bounded_owner_did,
+                &proof,
+                signer,
+                should_check_owner,
+            )?;
+            Self::try_add_requested_uris(&bounded_uri)?;
             let cv = if URAuthConfig::<T>::get().randomness_enabled() {
                 Self::challenge_value()
             } else {
                 challenge_value.ok_or(Error::<T>::ChallengeValueNotProvided)?
             };
-
             ChallengeValue::<T>::insert(&bounded_uri, cv);
-            URIMetadata::<T>::insert(&bounded_uri, Metadata::new(bounded_owner_did, cv));
+            Metadata::<T>::insert(
+                &bounded_uri,
+                RequestMetadata::new(bounded_owner_did, cv, claim_type, maybe_register_uri),
+            );
+            DIDs::<T>::insert(&signer_acc, did_detail);
 
             Self::deposit_event(Event::<T>::URAuthRegisterRequested { uri: bounded_uri });
 
@@ -344,8 +434,9 @@ pub mod pallet {
         // 3. If the signature is valid, generate a metadata(owner_did, challenge_value)
         #[pallet::call_index(1)]
         #[pallet::weight(1_000)]
-        pub fn verify_challenge(origin: OriginFor<T>, challenge_value: Vec<u8>) -> DispatchResult {
+        pub fn verify_challenge(origin: OriginFor<T>, challenge_json: Vec<u8>) -> DispatchResult {
             let who = ensure_signed(origin)?;
+
             ensure!(
                 Self::oracle_members().contains(&who),
                 Error::<T>::NotOracleMember
@@ -353,11 +444,11 @@ pub mod pallet {
 
             // Parse json
             let (sig, proof_type, raw_payload, uri, owner_did, challenge) =
-                Self::try_handle_challenge_value(&challenge_value)?;
+                T::URAuthParser::parse_challenge_json(&challenge_json)?.into();
 
             // 1. OwnerDID of URI == Challenge Value's DID
             // 2. Verify signature
-            let owner = Self::try_verify_challenge_value(
+            let (owner, metadata) = Self::try_verify_challenge_value(
                 sig,
                 proof_type,
                 raw_payload,
@@ -371,8 +462,8 @@ pub mod pallet {
             } else {
                 VerificationSubmission::<T>::default()
             };
-            let res = vs.submit(member_count, (who, BlakeTwo256::hash(&challenge_value)))?;
-            Self::handle_verification_submission_result(&res, vs, &uri, owner)?;
+            let res = vs.submit(member_count, (who, BlakeTwo256::hash(&challenge_json)))?;
+            Self::handle_verification_submission_result(&res, vs, &uri, owner, metadata)?;
             Self::deposit_event(Event::<T>::VerificationInfo {
                 uri,
                 progress_status: res,
@@ -411,19 +502,21 @@ pub mod pallet {
             proof: Option<Proof>,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
+
             let (mut updated_urauth_doc, mut update_doc_status) =
                 Self::try_update_urauth_doc(&uri, &update_doc_field, updated_at, proof.clone())?;
-            let (owner, proof) =
+            let (owner, proof, did_detail) =
                 Self::try_verify_urauth_doc_proof(&uri, &updated_urauth_doc, proof)?;
             Self::try_store_updated_urauth_doc(
-                owner,
+                owner.clone(),
                 proof,
                 uri,
                 &mut updated_urauth_doc,
                 &mut update_doc_status,
                 update_doc_field,
             )?;
-
+            let owner_acc = Self::account_id_from_source(AccountIdSource::AccountId32(owner))?;
+            DIDs::<T>::insert(&owner_acc, did_detail);
             Ok(())
         }
 
@@ -444,7 +537,8 @@ pub mod pallet {
         //
         // Logic:
         // 1. Verify signature
-        // 2. Once it is verified, create new URAuthDoc based on `claim_type`
+        // 2. Verify signer is one of the parent owners
+        // 3. Once it is verified, create new URAuthDoc based on `claim_type`
         #[pallet::call_index(3)]
         #[pallet::weight(1_000)]
         pub fn claim_ownership(
@@ -456,18 +550,34 @@ pub mod pallet {
             proof: MultiSignature,
         ) -> DispatchResult {
             let _ = ensure_signed(origin)?;
+
+            let maybe_parent_acc = Self::account_id_from_source(AccountIdSource::AccountId32(
+                signer.clone().into_account(),
+            ))?;
+            let (maybe_register_uri, should_check_owner) =
+                Self::check_uri(&claim_type, false, &uri, Some(maybe_parent_acc))?;
+            ensure!(
+                URAuthTree::<T>::get(&maybe_register_uri).is_none(),
+                Error::<T>::AlreadyRegistered
+            );
             let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
             let bounded_owner_did: OwnerDID =
                 owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-            Self::verify_request_proof(&bounded_uri, &bounded_owner_did, &proof, signer)?;
+            let (signer_acc, did_detail) = Self::verify_request_proof(
+                &bounded_uri,
+                &bounded_owner_did,
+                &proof,
+                signer,
+                should_check_owner,
+            )?;
             let owner =
                 Self::account_id_from_source(AccountIdSource::DID(bounded_owner_did.to_vec()))?;
-            let (count, urauth_doc) = match claim_type {
-                ClaimType::File => Self::new_urauth_doc(owner, None, None)?,
-                ClaimType::Dataset {
+            let urauth_doc = match claim_type.clone() {
+                ClaimType::Contents {
                     data_source,
                     name,
                     description,
+                    ..
                 } => {
                     let bounded_name: AnyText =
                         name.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
@@ -483,17 +593,19 @@ pub mod pallet {
                         None => None,
                     };
                     DataSet::<T>::insert(
-                        &bounded_uri,
+                        &maybe_register_uri,
                         DataSetMetadata::<AnyText>::new(bounded_name, bounded_description),
                     );
                     Self::new_urauth_doc(owner, None, bounded_data_source)?
                 }
+                _ => Self::new_urauth_doc(owner, None, None)?,
             };
 
-            URAuthTree::<T>::insert(&bounded_uri, urauth_doc.clone());
+            URAuthTree::<T>::insert(&maybe_register_uri, urauth_doc.clone());
+            DIDs::<T>::insert(&signer_acc, did_detail);
             Self::deposit_event(Event::<T>::URAuthTreeRegistered {
-                count,
-                uri: bounded_uri,
+                claim_type,
+                uri: maybe_register_uri,
                 urauth_doc,
             });
 
@@ -521,6 +633,26 @@ pub mod pallet {
         }
 
         // Description:
+        // This transaction involves adding members of the Oracle node to the verification request after downloading the Challenge Value.
+        //
+        // Origin:
+        // ** Root(Authorized) privileged call **
+        //
+        // Params:
+        // - who: Whom to be included as Oracle member
+        #[pallet::call_index(5)]
+        #[pallet::weight(1_000)]
+        pub fn kick_oracle_member(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
+            T::AuthorizedOrigin::ensure_origin(origin)?;
+
+            OracleMembers::<T>::mutate(|m| {
+                m.try_push(who).map_err(|_| Error::<T>::MaxOracleMembers)
+            })?;
+
+            Ok(())
+        }
+
+        // Description:
         // This transaction allows for the update of various configurations within the URAuth pallet.
         //
         // Origin:
@@ -528,7 +660,7 @@ pub mod pallet {
         //
         // Params:
         // - randomness_enabled: Flag whether to create its randomness on-chain
-        #[pallet::call_index(5)]
+        #[pallet::call_index(6)]
         #[pallet::weight(1_000)]
         pub fn update_urauth_config(
             origin: OriginFor<T>,
@@ -542,12 +674,67 @@ pub mod pallet {
 
             Ok(())
         }
+
+        #[pallet::call_index(7)]
+        #[pallet::weight(1_000)]
+        pub fn add_uri_by_oracle(
+            origin: OriginFor<T>,
+            claim_type: ClaimType,
+            uri: Vec<u8>,
+        ) -> DispatchResult {
+            T::AuthorizedOrigin::ensure_origin(origin)?;
+
+            let uri_part: URIPart = T::URAuthParser::parse_uri(&uri, &claim_type)?.into();
+            Self::check_claim_type(&uri_part, &claim_type)?;
+            URIByOracle::<T>::try_mutate_exists(|uri_parts| -> DispatchResult {
+                let mut new = uri_parts.clone().map_or(Vec::new(), |v| v.to_vec());
+                new.push(uri_part.clone());
+                *uri_parts = Some(new.try_into().map_err(|_| Error::<T>::OverMaxSize)?);
+                Ok(())
+            })?;
+            Self::deposit_event(Event::<T>::URIByOracleAdded);
+            Ok(())
+        }
+
+        #[pallet::call_index(8)]
+        #[pallet::weight(1_000)]
+        pub fn remove_uri_by_oracle(
+            origin: OriginFor<T>,
+            claim_type: ClaimType,
+            uri: Vec<u8>,
+        ) -> DispatchResult {
+            T::AuthorizedOrigin::ensure_origin(origin)?;
+
+            let uri_part: URIPart = T::URAuthParser::parse_uri(&uri, &claim_type)?.into();
+            let mut is_removed = true;
+            URIByOracle::<T>::try_mutate_exists(|uri_parts| -> DispatchResult {
+                if let Some(v) = uri_parts {
+                    let new = v
+                        .into_iter()
+                        .filter(|u| *u != &uri_part)
+                        .map(|u| u.clone())
+                        .collect::<Vec<URIPart>>();
+                    *uri_parts = Some(new.try_into().map_err(|_| Error::<T>::OverMaxSize)?);
+                } else {
+                    is_removed = false;
+                }
+                Ok(())
+            })?;
+            if is_removed {
+                Self::deposit_event(Event::<T>::URIByOracleRemoved);
+            }
+            Ok(())
+        }
     }
 }
 
-impl<T: Config> Pallet<T> {
+impl<T: Config> Pallet<T>
+where
+    URIFor<T>: Into<URI>,
+    URIPartFor<T>: IsType<URIPart>,
+{
     /// 16 bytes uuid based on `URAuthDocCount`
-    fn doc_id() -> Result<(u128, DocId), DispatchError> {
+    fn doc_id() -> Result<DocId, DispatchError> {
         let count = Counter::<T>::get();
         Counter::<T>::try_mutate(|c| -> DispatchResult {
             *c = c.checked_add(1).ok_or(Error::<T>::Overflow)?;
@@ -555,32 +742,135 @@ impl<T: Config> Pallet<T> {
         })?;
         let b = count.to_le_bytes();
 
-        Ok((count, nuuid::Uuid::from_bytes(b).to_bytes()))
+        Ok(nuuid::Uuid::from_bytes(b).to_bytes())
     }
 
     fn unix_time() -> u128 {
-        T::UnixTime::now().as_millis()
+        <T as Config>::UnixTime::now().as_millis()
     }
 
     fn challenge_value() -> Randomness {
         Default::default()
     }
 
+    fn try_increase_nonce(acc: &T::AccountId) -> Result<DidDetails<T>, DispatchError> {
+        let mut did_detail = DIDs::<T>::get(acc).map_or(DidDetails::default(), |v| v);
+        did_detail.try_increase_nonce()?;
+        Ok(did_detail)
+    }
+
+    fn try_add_requested_uris(uri: &URI) -> DispatchResult {
+        let expire = <frame_system::Pallet<T>>::block_number() + T::VerificationPeriod::get();
+        RequestedURIs::<T>::try_mutate_exists(expire, |uris| -> DispatchResult {
+            let mut new = uris.clone().map_or(Default::default(), |v| v);
+            new.try_push(uri.clone())
+                .map_err(|_| Error::<T>::MaxRequest)?;
+            *uris = Some(new);
+            Ok(())
+        })?;
+        Ok(())
+    }
+
+    fn check_claim_type(uri_part: &URIPart, claim_type: &ClaimType) -> DispatchResult {
+        match claim_type {
+            ClaimType::Domain => ensure!(uri_part.host.is_some(), Error::<T>::BadClaim),
+            _ => {
+                ensure!(
+                    uri_part.scheme == "urauth://".as_bytes().to_vec(),
+                    Error::<T>::BadClaim
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn check_uri(
+        claim_type: &ClaimType,
+        is_oracle: bool,
+        raw_uri: &Vec<u8>,
+        maybe_parent_acc: Option<T::AccountId>,
+    ) -> Result<(URI, bool), DispatchError> {
+        let parsed_uri_part: URIPart = T::URAuthParser::parse_uri(raw_uri, claim_type)?.into();
+        let mut should_check_owner: bool = true;
+        Self::check_claim_type(&parsed_uri_part, claim_type)?;
+        let uri = if parsed_uri_part.is_root(claim_type) {
+            let (_, root_uri) = parsed_uri_part.full_uri();
+            root_uri
+        } else {
+            if is_oracle {
+                Self::check_uri_by_oracle(parsed_uri_part)?
+            } else {
+                should_check_owner = false;
+                Self::check_parent_owner(
+                    raw_uri.clone(),
+                    &maybe_parent_acc.ok_or(Error::<T>::BadClaim)?,
+                    &claim_type,
+                )?
+            }
+        };
+        Ok((
+            uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?,
+            should_check_owner,
+        ))
+    }
+
+    /// Check owner of given 'uri'. Parse the given uri
+    /// and check whether given owner is one of the owner of the parent_uris
+    ///
+    /// ## Example
+    ///
+    /// - uri: "sub2.sub1.example.com/path1"
+    ///
+    /// - base: "example.com"
+    ///
+    /// - parent_uri: ["(sub2.sub1.example.com, owner1)", "(sub1.example.com, owner2)", "(example.com, owner3)"]
+    ///
+    /// Check `maybe_owner == owner1?` -> `maybe_owner == owner2?` -> `maybe_owner == owner3?`.
+    /// If not, return `Error::<T>::NotURAuthDocOwner`
+    fn check_parent_owner(
+        raw_uri: Vec<u8>,
+        maybe_owner: &T::AccountId,
+        claim_type: &ClaimType,
+    ) -> Result<Vec<u8>, DispatchError> {
+        let uris = <URAuthParser<T> as Parser<T>>::parse_parent_uris(&raw_uri, &claim_type)?;
+        for uri in uris {
+            if let Some(urauth_doc) = URAuthTree::<T>::get(&uri) {
+                if urauth_doc.is_owner(maybe_owner) {
+                    return Ok(raw_uri);
+                }
+            }
+        }
+        Err(Error::<T>::NotURAuthDocOwner.into())
+    }
+
+    fn check_uri_by_oracle(parsed_uri_part: URIPart) -> Result<Vec<u8>, DispatchError> {
+        let mut temp: Option<Vec<u8>> = None;
+        if let Some(uri_parts) = URIByOracle::<T>::get() {
+            for uri_part in uri_parts {
+                if parsed_uri_part == uri_part {
+                    let (_, full_uri) = parsed_uri_part.full_uri();
+                    temp = Some(full_uri);
+                    break;
+                }
+            }
+            temp.ok_or(Error::<T>::BadClaim.into())
+        } else {
+            return Err(Error::<T>::NotURIByOracle.into());
+        }
+    }
+
     fn new_urauth_doc(
         owner_did: T::AccountId,
         asset: Option<MultiAsset>,
         data_source: Option<URI>,
-    ) -> Result<(URAuthDocCount, URAuthDoc<T::AccountId>), DispatchError> {
-        let (count, doc_id) = Self::doc_id()?;
-        Ok((
-            count,
-            URAuthDoc::new(
-                doc_id,
-                MultiDID::new(owner_did, 1),
-                Self::unix_time(),
-                asset,
-                data_source,
-            ),
+    ) -> Result<URAuthDoc<T::AccountId>, DispatchError> {
+        let doc_id = Self::doc_id()?;
+        Ok(URAuthDoc::new(
+            doc_id,
+            MultiDID::new(owner_did, 1),
+            Self::unix_time(),
+            asset,
+            data_source,
         ))
     }
 
@@ -593,18 +883,24 @@ impl<T: Config> Pallet<T> {
         owner_did: &OwnerDID,
         signature: &MultiSignature,
         signer: MultiSigner,
-    ) -> Result<(), DispatchError> {
-        let urauth_signed_payload = URAuthSignedPayload::<T::AccountId>::Request {
-            uri: uri.clone(),
-            owner_did: owner_did.clone(),
-        };
-
+        should_check_owner: bool,
+    ) -> Result<(T::AccountId, DidDetails<T>), DispatchError> {
         // Check whether account id of owner did and signer are same
         let signer_account_id = Self::account_id_from_source(AccountIdSource::AccountId32(
             signer.clone().into_account(),
         ))?;
 
-        Self::check_is_valid_owner(owner_did, &signer_account_id)?;
+        let did_detail = Self::try_increase_nonce(&signer_account_id)?;
+        let urauth_signed_payload =
+            URAuthSignedPayload::<T::AccountId, BlockNumberFor<T>>::Request {
+                uri: uri.clone(),
+                owner_did: owner_did.clone(),
+                nonce: did_detail.nonce(),
+            };
+
+        if should_check_owner {
+            Self::check_is_valid_owner(owner_did, &signer_account_id)?;
+        }
 
         // Check signature
         if !urauth_signed_payload
@@ -613,30 +909,50 @@ impl<T: Config> Pallet<T> {
             return Err(Error::<T>::BadProof.into());
         }
 
-        Ok(())
+        Ok((signer_account_id, did_detail))
+    }
+
+    fn handle_expired_requsted_uris(n: &BlockNumberFor<T>) -> (u64, u64) {
+        let mut r: u64 = 1;
+        let mut w: u64 = 1;
+        if let Some(uris) = RequestedURIs::<T>::get(n) {
+            for uri in uris.iter() {
+                Self::remove_all_uri_related(uri);
+                r += 1;
+                w += 3;
+            }
+        }
+        RequestedURIs::<T>::remove(n);
+        (r, w + 1)
     }
 
     /// Handle the result of _challenge value_ verification based on `VerificationSubmissionResult`
     fn handle_verification_submission_result(
         res: &VerificationSubmissionResult,
-        verficiation_submission: VerificationSubmission<T>,
+        verification_submission: VerificationSubmission<T>,
         uri: &URI,
         owner_did: T::AccountId,
+        metadata: RequestMetadata,
     ) -> Result<(), DispatchError> {
-        match res {
+       match res {
             VerificationSubmissionResult::Complete => {
-                let (count, urauth_doc) = Self::new_urauth_doc(owner_did, None, None)?;
-                URAuthTree::<T>::insert(&uri, urauth_doc.clone());
-                Self::remove_all_uri_related(uri.clone());
+                let RequestMetadata {
+                    claim_type,
+                    maybe_register_uri,
+                    ..
+                } = metadata;
+                let urauth_doc = Self::new_urauth_doc(owner_did, None, None)?;
+                URAuthTree::<T>::insert(&maybe_register_uri, urauth_doc.clone());
+                Self::remove_all_uri_related(&uri);
                 Self::deposit_event(Event::<T>::URAuthTreeRegistered {
-                    count,
-                    uri: uri.clone(),
+                    claim_type,
+                    uri: maybe_register_uri,
                     urauth_doc,
                 })
             }
-            VerificationSubmissionResult::Tie => Self::remove_all_uri_related(uri.clone()),
+            VerificationSubmissionResult::Tie => Self::remove_all_uri_related(&uri),
             VerificationSubmissionResult::InProgress => {
-                URIVerificationInfo::<T>::insert(&uri, verficiation_submission)
+                URIVerificationInfo::<T>::insert(&uri, verification_submission)
             }
         }
 
@@ -647,7 +963,7 @@ impl<T: Config> Pallet<T> {
     ///
     /// 1. Check given signature
     /// 2. Check whether `signer` and `owner` are identical
-    /// 3. Check whether `given` challenge value is same with `onchain` challenge value
+    /// 3. Check whether `given` challenge value is same with `on-chain` challenge value
     fn try_verify_challenge_value(
         sig: Vec<u8>,
         proof_type: Vec<u8>,
@@ -655,18 +971,18 @@ impl<T: Config> Pallet<T> {
         uri: &URI,
         owner_did: &OwnerDID,
         challenge: Vec<u8>,
-    ) -> Result<T::AccountId, DispatchError> {
+    ) -> Result<(T::AccountId, RequestMetadata), DispatchError> {
         let multi_sig = Self::raw_signature_to_multi_sig(&proof_type, &sig)?;
         let signer = Self::account_id32_from_raw_did(owner_did.to_vec())?;
         if !multi_sig.verify(&raw_payload[..], &signer) {
             return Err(Error::<T>::BadProof.into());
         }
-        let uri_metadata = URIMetadata::<T>::get(uri).ok_or(Error::<T>::BadRequest)?;
+        let uri_metadata = Metadata::<T>::get(uri).ok_or(Error::<T>::BadRequest)?;
         let signer = Self::account_id_from_source(AccountIdSource::DID(owner_did.to_vec()))?;
         Self::check_is_valid_owner(&uri_metadata.owner_did, &signer)
             .map_err(|_| Error::<T>::BadSigner)?;
         Self::check_challenge_value(uri, challenge)?;
-        Ok(signer)
+        Ok((signer, uri_metadata))
     }
 
     /// Check whether `owner` and `signer` are identical
@@ -680,7 +996,7 @@ impl<T: Config> Pallet<T> {
         Ok(())
     }
 
-    /// Check whether `given` challenge value is same with `onchain` challenge value
+    /// Check whether `given` challenge value is same with `on-chain` challenge value
     ///
     /// ## Errors
     ///
@@ -690,7 +1006,7 @@ impl<T: Config> Pallet<T> {
     ///
     /// - `BadChallengeValue`
     ///
-    /// Given challenge value and onchain challenge value are not identical
+    /// Given challenge value and on-chain challenge value are not identical
     fn check_challenge_value(uri: &URI, challenge: Vec<u8>) -> Result<(), DispatchError> {
         let cv = ChallengeValue::<T>::get(&uri).ok_or(Error::<T>::ChallengeValueMissing)?;
         ensure!(challenge == cv.to_vec(), Error::<T>::BadChallengeValue);
@@ -698,7 +1014,7 @@ impl<T: Config> Pallet<T> {
     }
 
     /// Update the `URAuthDoc` based on `UpdateDocField`.
-    /// If it is first time requestsed, `UpdateStatus` would be `Available`.
+    /// If it is first time requested, `UpdateStatus` would be `Available`.
     /// Otherwise, `InProgress { .. }`.
     ///
     /// ## Errors
@@ -777,7 +1093,7 @@ impl<T: Config> Pallet<T> {
         uri: &URI,
         urauth_doc: &URAuthDoc<T::AccountId>,
         proof: Option<Proof>,
-    ) -> Result<(AccountId32, Proof), DispatchError> {
+    ) -> Result<(AccountId32, Proof, DidDetails<T>), DispatchError> {
         let (owner_did, sig) = match proof.clone().ok_or(Error::<T>::ProofMissing)? {
             Proof::ProofV1 { did, proof } => (did, proof),
         };
@@ -785,17 +1101,19 @@ impl<T: Config> Pallet<T> {
         if !urauth_doc.multi_owner_did.is_owner(&owner_account) {
             return Err(Error::<T>::NotURAuthDocOwner.into());
         }
-        let payload = URAuthSignedPayload::<T::AccountId>::Update {
+        let did_detail = Self::try_increase_nonce(&owner_account)?;
+        let payload = URAuthSignedPayload::<T::AccountId, BlockNumberFor<T>>::Update {
             uri: uri.clone(),
             urauth_doc: urauth_doc.clone(),
             owner_did: owner_did.clone(),
+            nonce: did_detail.nonce(),
         };
         let signer = Pallet::<T>::account_id32_from_raw_did(owner_did.to_vec())?;
         if !payload.using_encoded(|m| sig.verify(m, &signer)) {
             return Err(Error::<T>::BadProof.into());
         }
 
-        Ok((signer, proof.expect("Already checked!")))
+        Ok((signer, proof.expect("Already checked!"), did_detail))
     }
 
     /// Try to store _updated_urauth_doc_ on `URAuthTree::<T>` based on `URAuthDocStatus`
@@ -848,97 +1166,12 @@ impl<T: Config> Pallet<T> {
     ///
     /// ## Changes
     /// `URIMetadata`, `URIVerificationInfo`, `ChallengeValue`
-    fn remove_all_uri_related(uri: URI) {
-        URIMetadata::<T>::remove(&uri);
-        URIVerificationInfo::<T>::remove(&uri);
-        ChallengeValue::<T>::remove(&uri);
+    fn remove_all_uri_related(uri: &URI) {
+        Metadata::<T>::remove(uri);
+        URIVerificationInfo::<T>::remove(uri);
+        ChallengeValue::<T>::remove(uri);
 
-        Self::deposit_event(Event::<T>::Removed { uri })
-    }
-
-    /// Try prase the raw-json and return opaque type of
-    /// (`Signature`, `proof type`, `payload`, `uri`, `owner_did`, `challenge`)
-    ///
-    /// ## Errors
-    /// `ErrorConvertToString`
-    /// - Error on converting raw-json to string-json
-    ///
-    /// `BadChallengeValue`
-    /// - When input is not type of `lite_json::Object`
-    /// - Fail on parsing some fields
-    fn try_handle_challenge_value(
-        challenge_value: &Vec<u8>,
-    ) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, URI, OwnerDID, Vec<u8>), DispatchError> {
-        let json_str = sp_std::str::from_utf8(challenge_value)
-            .map_err(|_| Error::<T>::ErrorConvertToString)?;
-
-        match lite_json::parse_json(json_str) {
-            Ok(obj) => match obj {
-                // ToDo: Check domain, admin_did, challenge
-                lite_json::JsonValue::Object(obj) => {
-                    let uri = Self::find_json_value(&obj, "domain", None)?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let owner_did = Self::find_json_value(&obj, "adminDID", None)?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let challenge = Self::find_json_value(&obj, "challenge", None)?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let timestamp = Self::find_json_value(&obj, "timestamp", None)?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let proof_type = Self::find_json_value(&obj, "proof", Some("type"))?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let hex_proof = Self::find_json_value(&obj, "proof", Some("proofValue"))?
-                        .ok_or(Error::<T>::BadChallengeValue)?;
-                    let mut proof = [0u8; 64];
-                    hex::decode_to_slice(hex_proof, &mut proof as &mut [u8])
-                        .map_err(|_| Error::<T>::ErrorDecodeHex)?;
-                    let mut raw_payload: Vec<u8> = Default::default();
-                    let bounded_uri: URI = uri.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-                    let bounded_owner_did: OwnerDID =
-                        owner_did.try_into().map_err(|_| Error::<T>::OverMaxSize)?;
-                    URAuthSignedPayload::<T::AccountId>::Challenge {
-                        uri: bounded_uri.clone(),
-                        owner_did: bounded_owner_did.clone(),
-                        challenge: challenge.clone(),
-                        timestamp,
-                    }
-                    .using_encoded(|m| raw_payload = m.to_vec());
-
-                    return Ok((
-                        proof.to_vec(),
-                        proof_type,
-                        raw_payload,
-                        bounded_uri,
-                        bounded_owner_did,
-                        challenge,
-                    ));
-                }
-                _ => return Err(Error::<T>::BadChallengeValue.into()),
-            },
-            Err(_) => return Err(Error::<T>::BadChallengeValue.into()),
-        }
-    }
-
-    /// Method for finding _json_value_ based on `field_name` and `sub_field`
-    ///
-    /// ## Error
-    /// `BadChallengeValue`
-    fn find_json_value(
-        json_object: &lite_json::JsonObject,
-        field_name: &str,
-        sub_field: Option<&str>,
-    ) -> Result<Option<Vec<u8>>, DispatchError> {
-        let sub = sub_field.map_or("", |s| s);
-        let (_, json_value) = json_object
-            .iter()
-            .find(|(field, _)| field.iter().copied().eq(field_name.chars()))
-            .ok_or(Error::<T>::BadChallengeValue)?;
-        match json_value {
-            lite_json::JsonValue::String(v) => {
-                Ok(Some(v.iter().map(|c| *c as u8).collect::<Vec<u8>>()))
-            }
-            lite_json::JsonValue::Object(v) => Self::find_json_value(v, sub, None),
-            _ => Ok(None),
-        }
+        Self::deposit_event(Event::<T>::Removed { uri: uri.clone() })
     }
 
     /// Try to convert some id sources to `T::AccountId` based on `AccountIdSource::DID` or `AccountIdSource::AccountId32`

@@ -76,7 +76,11 @@ parameter_types! {
 impl pallet_urauth::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type UnixTime = Timestamp;
+    type URAuthParser = URAuthParser<Self>;
     type MaxOracleMembers = MaxOracleMembers;
+    type MaxURIByOracle = ConstU32<100>;
+    type VerificationPeriod = ConstU64<3>;
+    type MaxRequest = ConstU32<5>;
     type AuthorizedOrigin = EnsureRoot<MockAccountId>;
 }
 
@@ -108,7 +112,7 @@ impl<Account: Encode> MockURAuthHelper<Account> {
         let account_id = account_id.map_or(String::from(ALICE_SS58), |id| id);
         Self {
             mock_doc_manager: MockURAuthDocManager::new(
-                uri.map_or(String::from("www.website1.com"), |uri| uri),
+                uri.map_or(String::from("https://www.website1.com"), |uri| uri),
                 format!("{}{}", "did:infra:ua:", account_id),
                 challenge_value.map_or(String::from("E40Bzg8kAvOIjswwxc29WaQCHuOKwoZC"), |cv| cv),
                 timestamp.map_or(String::from("2023-07-28T10:17:21Z"), |t| t),
@@ -184,21 +188,25 @@ impl<Account: Encode> MockURAuthHelper<Account> {
 
 #[derive(Clone)]
 pub enum ProofType<Account: Encode> {
-    Request(URI, OwnerDID),
+    Request(URI, OwnerDID, MockBlockNumber),
     Challenge(URI, OwnerDID, Vec<u8>, Vec<u8>),
-    Update(URI, URAuthDoc<Account>, OwnerDID),
+    Update(URI, URAuthDoc<Account>, OwnerDID, MockBlockNumber),
 }
 
 pub struct MockProver<Account>(PhantomData<Account>);
 
 impl<Account: Encode> MockProver<Account> {
-    fn raw_payload(&mut self, proof_type: ProofType<Account>) -> Vec<u8> {
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+
+    fn raw_payload(&self, proof_type: ProofType<Account>) -> Vec<u8> {
         let raw = match proof_type {
-            ProofType::Request(uri, owner_did) => (uri, owner_did).encode(),
+            ProofType::Request(uri, owner_did, nonce) => (uri, owner_did, nonce).encode(),
             ProofType::Challenge(uri, owner_did, challenge, timestamp) => {
                 (uri, owner_did, challenge, timestamp).encode()
             }
-            ProofType::Update(uri, urauth_doc, owner_did) => {
+            ProofType::Update(uri, urauth_doc, owner_did, nonce) => {
                 let URAuthDoc {
                     id,
                     created_at,
@@ -226,6 +234,7 @@ impl<Account: Encode> MockProver<Account> {
                     asset,
                     data_source,
                     owner_did,
+                    nonce,
                 )
                     .encode()
             }
@@ -368,6 +377,113 @@ impl MockURAuthDocManager {
     }
 }
 
+#[derive(Clone)]
+pub struct RequestCall {
+    origin: RuntimeOrigin,
+    claim_type: ClaimType,
+    uri: Vec<u8>,
+    owner_did: Vec<u8>,
+    challenge: Option<Randomness>,
+    signer: MultiSigner,
+    sig: MultiSignature,
+}
+
+impl RequestCall {
+    pub fn new(
+        origin: RuntimeOrigin,
+        claim_type: ClaimType,
+        uri: Vec<u8>,
+        owner_did: Vec<u8>,
+        challenge: Option<Randomness>,
+        signer: MultiSigner,
+        sig: MultiSignature,
+    ) -> Self {
+        Self {
+            origin,
+            claim_type,
+            uri,
+            owner_did,
+            challenge,
+            signer,
+            sig,
+        }
+    }
+
+    pub fn runtime_call(self) -> DispatchResult {
+        match self.challenge {
+            Some(_) => URAuth::request_register_ownership(
+                self.origin,
+                self.claim_type,
+                self.uri,
+                self.owner_did,
+                self.challenge,
+                self.signer,
+                self.sig,
+            ),
+            None => URAuth::claim_ownership(
+                self.origin,
+                self.claim_type,
+                self.uri,
+                self.owner_did,
+                self.signer,
+                self.sig,
+            ),
+        }
+    }
+    pub fn set_origin(mut self, origin: RuntimeOrigin) -> Self {
+        self.origin = origin;
+        self
+    }
+    pub fn set_claim_type(mut self, claim_type: ClaimType) -> Self {
+        self.claim_type = claim_type;
+        self
+    }
+    pub fn set_uri(mut self, uri: Vec<u8>) -> Self {
+        self.uri = uri;
+        self
+    }
+    pub fn set_owner_did(mut self, owner_did: Vec<u8>) -> Self {
+        self.owner_did = owner_did;
+        self
+    }
+    pub fn set_challenge(mut self, challenge: Option<Randomness>) -> Self {
+        self.challenge = challenge;
+        self
+    }
+    pub fn set_signer(mut self, signer: MultiSigner) -> Self {
+        self.signer = signer;
+        self
+    }
+    pub fn set_sig(mut self, sig: MultiSignature) -> Self {
+        self.sig = sig;
+        self
+    }
+}
+
+pub struct AddURIByOracleCall {
+    pub origin: RuntimeOrigin,
+    pub claim_type: ClaimType,
+    pub uri: Vec<u8>,
+}
+
+impl AddURIByOracleCall {
+    pub fn runtime_call(&self) -> DispatchResult {
+        URAuth::add_uri_by_oracle(
+            self.origin.clone(),
+            self.claim_type.clone(),
+            self.uri.clone(),
+        )
+    }
+    pub fn set_claim_type(mut self, claim_type: ClaimType) -> Self {
+        self.claim_type = claim_type;
+        self
+    }
+    pub fn set_uri(mut self, uri: Vec<u8>) -> Self {
+        self.uri = uri;
+        self
+    }
+}
+
 impl ExtBuilder {
     fn build(self) -> sp_io::TestExternalities {
         let storage = frame_system::GenesisConfig::default()
@@ -381,6 +497,15 @@ impl ExtBuilder {
     pub fn build_and_execute(self, test: impl FnOnce() -> ()) {
         let mut ext = self.build();
         ext.execute_with(test);
+    }
+}
+
+pub fn run_to_block(n: BlockNumberFor<Test>) {
+    while System::block_number() < n {
+        System::on_finalize(System::block_number());
+        System::set_block_number(System::block_number() + 1);
+        System::on_initialize(System::block_number());
+        <URAuth as Hooks<BlockNumberFor<Test>>>::on_initialize(System::block_number());
     }
 }
 

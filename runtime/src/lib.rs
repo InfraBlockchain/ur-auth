@@ -531,14 +531,57 @@ impl system_token_aggregator::Config for Runtime {
 }
 
 parameter_types! {
+    pub MaximumSchedulerWeight: Weight = Perbill::from_percent(80) *
+        RuntimeBlockWeights::get().max_block;
+}
+
+impl pallet_scheduler::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type RuntimeOrigin = RuntimeOrigin;
+    type PalletsOrigin = OriginCaller;
+    type RuntimeCall = RuntimeCall;
+    type MaximumWeight = MaximumSchedulerWeight;
+    type ScheduleOrigin = EnsureRoot<AccountId>;
+    #[cfg(feature = "runtime-benchmarks")]
+    type MaxScheduledPerBlock = ConstU32<512>;
+    #[cfg(not(feature = "runtime-benchmarks"))]
+    type MaxScheduledPerBlock = ConstU32<50>;
+    type WeightInfo = pallet_scheduler::weights::SubstrateWeight<Runtime>;
+    type OriginPrivilegeCmp = frame_support::traits::EqualPrivilegeOnly;
+    type Preimages = Preimage;
+}
+
+parameter_types! {
+    pub const PreimageBaseDeposit: Balance = MILLIUNIT;
+    // One cent: $10,000 / MB
+    pub const PreimageByteDeposit: Balance = MICROUNIT;
+}
+
+impl pallet_preimage::Config for Runtime {
+    type WeightInfo = pallet_preimage::weights::SubstrateWeight<Runtime>;
+    type RuntimeEvent = RuntimeEvent;
+    type Currency = Balances;
+    type ManagerOrigin = EnsureRoot<AccountId>;
+    type BaseDeposit = PreimageBaseDeposit;
+    type ByteDeposit = PreimageByteDeposit;
+}
+
+parameter_types! {
     pub const MaxOracleMembers: u32 = 10;
+    pub const MaxURIByOracle: u32 = 100;
+    pub const VerificationPeriod: BlockNumber = 100;
+    pub const MaxRequest: u32 = 100;
 }
 
 impl pallet_urauth::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
-    type AuthorizedOrigin = EnsureRoot<AccountId>;
+    type URAuthParser = pallet_urauth::URAuthParser<Self>;
     type UnixTime = Timestamp;
     type MaxOracleMembers = MaxOracleMembers;
+    type MaxURIByOracle = MaxURIByOracle;
+    type VerificationPeriod = VerificationPeriod;
+    type MaxRequest = MaxRequest;
+    type AuthorizedOrigin = EnsureRoot<AccountId>;
 }
 
 // Create the runtime by composing the FRAME pallets that were previously configured.
@@ -579,6 +622,13 @@ construct_runtime!(
         AssetLink: pallet_asset_link = 34,
         SystemTokenAggregator: system_token_aggregator = 35,
         SystemToken: pallet_system_token = 36,
+
+        // Governance
+        // Preimage registrar.
+        Preimage: pallet_preimage::{Pallet, Call, Storage, Event<T>} = 40,
+
+        // System scheduler.
+        Scheduler: pallet_scheduler::{Pallet, Call, Storage, Event<T>} = 41,
     }
 );
 
